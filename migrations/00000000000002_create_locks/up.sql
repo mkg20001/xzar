@@ -1,0 +1,7 @@
+CREATE TABLE locks (
+    id SERIAL PRIMARY KEY,
+    expires TIMESTAMP NOT NULL DEFAULT (CURRENT_TIMESTAMP + INTERVAL '2 days'),
+    owner INTEGER NOT NULL DEFAULT 1
+);
+
+CREATE INDEX idx_locks_expires ON locks(expires);

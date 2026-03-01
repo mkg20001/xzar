@@ -1,0 +1,23 @@
+hapi:
+  host: '::'
+  port: 17788
+
+storage: '/storage/cache'
+
+tokens:
+- hashed: ...
+
+# generate a key:
+#  nix-store --generate-binary-cache-key KEY-NAME cache-priv-key.pem cache-pub-key.pem
+#  (KEY-NAME can be anything for example the domain and an identifier, e.g. example.com-1)
+
+# if private provided then API uploaded will be signed before added to cache
+signingKey: '<signing-key>'
+# if ONLY public provided than API uploaded will be expected to be signed before added to cache
+signingPubKey: '<pubkey>'
+
+externalUrl: 'https://cache.xeredo.it'
+
+db:
+  client: 'pg'
+  connection: 'postgres://postgres:postgres@localhost/xzar'
