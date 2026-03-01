@@ -44,6 +44,10 @@
             pkg-config
             postgresql
             coreutils
+            # For client tests
+            nix
+            xz
+            pixz
           ];
           text = builtins.readFile ./scripts/run-integration-tests.sh;
         };

@@ -37,6 +37,51 @@ fn nix_base32_len(hash_size: usize) -> usize {
     (hash_size * 8 + 4) / 5
 }
 
+/// Parse a hash string that can be in either:
+/// - SRI format: sha256-BASE64...
+/// - Nix format: sha256:NIXBASE32...
+///
+/// Returns (algorithm, nix_base32_hash)
+pub fn parse_hash(hash_str: &str) -> Result<(String, String)> {
+    // Try SRI format first (sha256-base64)
+    if hash_str.contains('-') {
+        return sri_to_nix_hash(hash_str);
+    }
+
+    // Try Nix format (sha256:nixbase32)
+    if hash_str.contains(':') {
+        return nix_hash_to_parts(hash_str);
+    }
+
+    Err(AppError::Crypto(format!(
+        "Invalid hash format: {}. Expected SRI (sha256-base64) or Nix (sha256:base32)",
+        hash_str
+    )))
+}
+
+/// Parse Nix format hash (sha256:nixbase32) into parts
+pub fn nix_hash_to_parts(nix_hash: &str) -> Result<(String, String)> {
+    let parts: Vec<&str> = nix_hash.splitn(2, ':').collect();
+    if parts.len() != 2 {
+        return Err(AppError::Crypto(format!("Invalid Nix hash: {}", nix_hash)));
+    }
+
+    let algo = parts[0];
+    let hash = parts[1];
+
+    if algo != "sha256" && algo != "sha512" && algo != "sha1" {
+        return Err(AppError::Crypto(format!("Unsupported hash algorithm: {}", algo)));
+    }
+
+    // Validate it looks like nix base32
+    let valid_chars = "0123456789abcdfghijklmnpqrsvwxyz";
+    if !hash.chars().all(|c| valid_chars.contains(c)) {
+        return Err(AppError::Crypto(format!("Invalid Nix base32 hash: {}", hash)));
+    }
+
+    Ok((algo.to_string(), hash.to_string()))
+}
+
 /// Convert SRI hash (sha256-base64) to Nix format (sha256:base32)
 pub fn sri_to_nix_hash(integrity: &str) -> Result<(String, String)> {
     let parts: Vec<&str> = integrity.splitn(2, '-').collect();

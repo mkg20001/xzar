@@ -10,7 +10,7 @@ use std::io::Write;
 
 use crate::auth::AuthenticatedUser;
 use crate::config::Config;
-use crate::crypto::{sri_to_nix_hash, NixSigningKey};
+use crate::crypto::{parse_hash, NixSigningKey};
 use crate::db::Db;
 use crate::error::{AppError, Result};
 use crate::models::{DrvLock, NewDrv, OkResponse};
@@ -177,8 +177,8 @@ pub async fn upload_nar(
 
     let file_size = file_data.len() as i64;
 
-    // Convert NAR hash from SRI format to Nix format
-    let (algo, nar_hash_nix) = sri_to_nix_hash(&hash)?;
+    // Parse NAR hash (accepts SRI or Nix format)
+    let (algo, nar_hash_nix) = parse_hash(&hash)?;
     let nar_hash = format!("{}:{}", algo, nar_hash_nix);
 
     // Generate signature if signing key is configured

@@ -1,29 +1,16 @@
-//! Integration tests for xzar server
+//! Server API integration tests
 //!
-//! These tests require:
-//! - A PostgreSQL database (TEST_DATABASE_URL or DATABASE_URL env var)
-//! - Nix installed (for nix-build)
-//! - The xzar client binary built
+//! These tests verify the xzar server API using Rocket's test client.
 //!
-//! Run with: cargo test --test integration_test --features test_harness -- --test-threads=1
-
-use std::process::{Command, Stdio};
+//! Requirements:
+//! - PostgreSQL database (TEST_DATABASE_URL or DATABASE_URL env var)
+//!
+//! Run with: cargo test -p xzar-interop --test server -- --test-threads=1
 
 use rocket::http::{ContentType, Status};
 use serde_json::json;
 
 use xzar_server::test_harness::{TestCredentials, TestServer};
-
-/// Helper to check if nix is available
-fn nix_available() -> bool {
-    Command::new("nix-build")
-        .arg("--version")
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .status()
-        .map(|s| s.success())
-        .unwrap_or(false)
-}
 
 /// Helper to check if database is available
 fn database_available() -> bool {
@@ -33,7 +20,7 @@ fn database_available() -> bool {
 #[rocket::async_test]
 async fn test_nix_cache_info() {
     if !database_available() {
-        eprintln!("Skipping test_nix_cache_info: no database configured");
+        eprintln!("Skipping test: no database configured");
         return;
     }
 
@@ -50,13 +37,12 @@ async fn test_nix_cache_info() {
 #[rocket::async_test]
 async fn test_check_paths_authenticated() {
     if !database_available() {
-        eprintln!("Skipping test_check_paths_authenticated: no database configured");
+        eprintln!("Skipping test: no database configured");
         return;
     }
 
     let server = TestServer::new().await;
 
-    // Test authenticated request
     let response = server
         .post_authenticated("/check")
         .header(ContentType::JSON)
@@ -70,13 +56,12 @@ async fn test_check_paths_authenticated() {
 #[rocket::async_test]
 async fn test_check_paths_unauthenticated() {
     if !database_available() {
-        eprintln!("Skipping test_check_paths_unauthenticated: no database configured");
+        eprintln!("Skipping test: no database configured");
         return;
     }
 
     let server = TestServer::new().await;
 
-    // Test unauthenticated request should fail
     let response = server
         .client
         .post("/check")
@@ -91,7 +76,7 @@ async fn test_check_paths_unauthenticated() {
 #[rocket::async_test]
 async fn test_lock_request_and_clear() {
     if !database_available() {
-        eprintln!("Skipping test_lock_request_and_clear: no database configured");
+        eprintln!("Skipping test: no database configured");
         return;
     }
 
@@ -141,7 +126,7 @@ async fn test_lock_request_and_clear() {
 #[rocket::async_test]
 async fn test_narinfo_not_found() {
     if !database_available() {
-        eprintln!("Skipping test_narinfo_not_found: no database configured");
+        eprintln!("Skipping test: no database configured");
         return;
     }
 
@@ -159,7 +144,7 @@ async fn test_narinfo_not_found() {
 #[rocket::async_test]
 async fn test_nar_not_found() {
     if !database_available() {
-        eprintln!("Skipping test_nar_not_found: no database configured");
+        eprintln!("Skipping test: no database configured");
         return;
     }
 
@@ -183,69 +168,32 @@ fn test_credentials_signing() {
     assert!(signature.starts_with(&format!("{}:", creds.key_name)));
 }
 
-/// Full integration test: build with nix and upload
-/// This test is ignored by default because it requires nix and takes time
 #[rocket::async_test]
-#[ignore]
-async fn test_nix_build_and_upload() {
+async fn test_check_multiple_paths() {
     if !database_available() {
-        eprintln!("Skipping test_nix_build_and_upload: no database configured");
-        return;
-    }
-
-    if !nix_available() {
-        eprintln!("Skipping test_nix_build_and_upload: nix not available");
+        eprintln!("Skipping test: no database configured");
         return;
     }
 
     let server = TestServer::new().await;
 
-    // Build a small package with nix
-    // Using `hello` instead of openssl as it's smaller
-    let output = Command::new("nix-build")
-        .args(&["<nixpkgs>", "-A", "hello", "--no-out-link"])
-        .output()
-        .expect("Failed to run nix-build");
+    let paths = vec![
+        "/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-pkg1",
+        "/nix/store/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb-pkg2",
+        "/nix/store/cccccccccccccccccccccccccccccccc-pkg3",
+    ];
 
-    if !output.status.success() {
-        eprintln!(
-            "nix-build failed: {}",
-            String::from_utf8_lossy(&output.stderr)
-        );
-        return;
-    }
-
-    let store_path = String::from_utf8_lossy(&output.stdout)
-        .trim()
-        .to_string();
-
-    eprintln!("Built: {}", store_path);
-
-    // Extract the derivation ID from the store path
-    // Format: /nix/store/<hash>-<name>
-    let _drv_full = store_path
-        .strip_prefix("/nix/store/")
-        .expect("Invalid store path");
-
-    // Check if the path needs to be uploaded
     let response = server
         .post_authenticated("/check")
         .header(ContentType::JSON)
-        .body(json!({"paths": [store_path]}).to_string())
+        .body(json!({"paths": paths}).to_string())
         .dispatch()
         .await;
 
     assert_eq!(response.status(), Status::Ok);
     let body: serde_json::Value = response.into_json().await.unwrap();
-    let needs_upload: Vec<String> = body["need"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .map(|v| v.as_str().unwrap().to_string())
-        .collect();
 
-    eprintln!("Needs upload: {:?}", needs_upload);
-
-    // The path should need uploading since it's a fresh server
-    assert!(needs_upload.contains(&store_path));
+    // All paths should need upload since they don't exist
+    let need = body["need"].as_array().unwrap();
+    assert_eq!(need.len(), 3);
 }

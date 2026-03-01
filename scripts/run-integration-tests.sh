@@ -2,12 +2,18 @@
 set -euo pipefail
 
 # Integration test runner that sets up a temporary PostgreSQL instance
-# with socket authentication and runs the xzar-server integration tests.
+# with socket authentication and runs the xzar interop tests.
 #
 # Usage: run-integration-tests.sh [CARGO_TEST_ARGS...]
 #
 # All arguments are passed directly to cargo test.
 # The script must be run from the xzar-rust project directory.
+#
+# Examples:
+#   ./scripts/run-integration-tests.sh                    # Run all tests
+#   ./scripts/run-integration-tests.sh --include-ignored  # Include nix tests
+#   ./scripts/run-integration-tests.sh --test server      # Run only server tests
+#   ./scripts/run-integration-tests.sh --test client      # Run only client tests
 
 PROJECT_ROOT="$PWD"
 
@@ -79,15 +85,20 @@ createdb -h "$SOCKET_DIR" xzar_test
 # Set DATABASE_URL for the tests
 export DATABASE_URL="postgres://?host=$SOCKET_DIR&dbname=xzar_test"
 
-echo "Running integration tests..."
+cd "$PROJECT_ROOT"
+
+# Build both binaries (needed for client tests)
+echo "Building xzar-server and xzar-client..."
+cargo build -p xzar-server -p xzar-client --quiet
+
+echo
+echo "Running interop tests..."
 echo "DATABASE_URL=$DATABASE_URL"
 echo
 
-cd "$PROJECT_ROOT"
-
 # Run the tests
 # --test-threads=1 ensures tests don't interfere with each other
-cargo test -p xzar-server --test integration_test --features test_harness -- --test-threads=1 "${CARGO_TEST_ARGS[@]}"
+cargo test -p xzar-interop -- --test-threads=1 "${CARGO_TEST_ARGS[@]}"
 
 echo
 echo "All tests passed!"
