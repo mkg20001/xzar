@@ -35,6 +35,18 @@
             nativeBuildInputs = commonBuildInputs;
             inherit buildInputs cargoBuildFlags;
           });
+
+        # Test script with all dependencies
+        testScript = pkgs.writeShellApplication {
+          name = "xzar-integration-tests";
+          runtimeInputs = with pkgs; [
+            rustToolchain
+            pkg-config
+            postgresql
+            coreutils
+          ];
+          text = builtins.readFile ./scripts/run-integration-tests.sh;
+        };
       in
       {
         devShells.default = pkgs.mkShell {
@@ -86,6 +98,17 @@
 
           # Default is server
           default = self.packages.${system}.xzar-server;
+
+          # Test script package
+          integration-tests = testScript;
+        };
+
+        # Apps for running with `nix run`
+        apps = {
+          integration-tests = {
+            type = "app";
+            program = "${testScript}/bin/xzar-integration-tests";
+          };
         };
       }
     ) // {

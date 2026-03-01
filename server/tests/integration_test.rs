@@ -110,7 +110,7 @@ async fn test_lock_request_and_clear() {
 
     assert_eq!(response.status(), Status::Ok);
     let body: serde_json::Value = response.into_json().await.unwrap();
-    let lock_id = body["lockId"].as_i64().unwrap();
+    let lock_id = body["lock"].as_i64().unwrap();
     assert!(lock_id > 0);
 
     // Extend the lock
@@ -118,7 +118,7 @@ async fn test_lock_request_and_clear() {
         .post_authenticated("/lock/extend")
         .header(ContentType::JSON)
         .body(json!({
-            "lockId": lock_id
+            "lock": lock_id
         }).to_string())
         .dispatch()
         .await;
@@ -130,7 +130,7 @@ async fn test_lock_request_and_clear() {
         .post_authenticated("/lock/clear")
         .header(ContentType::JSON)
         .body(json!({
-            "lockId": lock_id
+            "lock": lock_id
         }).to_string())
         .dispatch()
         .await;
@@ -237,7 +237,7 @@ async fn test_nix_build_and_upload() {
 
     assert_eq!(response.status(), Status::Ok);
     let body: serde_json::Value = response.into_json().await.unwrap();
-    let needs_upload: Vec<String> = body["upload"]
+    let needs_upload: Vec<String> = body["need"]
         .as_array()
         .unwrap()
         .iter()
