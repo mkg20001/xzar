@@ -38,7 +38,7 @@ in
 
   config = mkIf (cfg.enable) {
     services.xzar-server.config = {
-      hapi = {
+      rocket = {
         host = "::";
         port = cfg.port;
       };

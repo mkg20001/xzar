@@ -145,7 +145,7 @@ db:
 tokens:
   - plain: "{}"
 signingKey: "{}"
-hapi:
+rocket:
   host: "127.0.0.1"
   port: {}
 "#,

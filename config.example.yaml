@@ -1,4 +1,4 @@
-hapi:
+rocket:
   host: '::'
   port: 17788
 

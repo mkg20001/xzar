@@ -7,7 +7,7 @@ use crate::error::{AppError, Result};
 #[derive(Debug, Deserialize, Clone)]
 pub struct Config {
     #[serde(default)]
-    pub hapi: HapiConfig,
+    pub rocket: RocketConfig,
     pub storage: String,
     #[serde(default)]
     pub tokens: Vec<TokenConfig>,
@@ -22,14 +22,14 @@ pub struct Config {
 }
 
 #[derive(Debug, Deserialize, Clone)]
-pub struct HapiConfig {
+pub struct RocketConfig {
     #[serde(default = "default_host")]
     pub host: String,
     #[serde(default = "default_port")]
     pub port: u16,
 }
 
-impl Default for HapiConfig {
+impl Default for RocketConfig {
     fn default() -> Self {
         Self {
             host: default_host(),
@@ -113,13 +113,13 @@ impl Config {
             config.sentry_dsn = Some(sentry_dsn);
         }
 
-        if let Ok(host) = std::env::var("XZAR_HOST") {
-            config.hapi.host = host;
+        if let Ok(host) = std::env::var("ROCKET_ADDRESS") {
+            config.rocket.host = host;
         }
 
-        if let Ok(port) = std::env::var("XZAR_PORT") {
+        if let Ok(port) = std::env::var("ROCKET_PORT") {
             if let Ok(p) = port.parse() {
-                config.hapi.port = p;
+                config.rocket.port = p;
             }
         }
 

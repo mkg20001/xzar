@@ -1,6 +1,8 @@
 #[macro_use]
 extern crate rocket;
 
+use std::net::IpAddr;
+
 use diesel::r2d2::{ConnectionManager, Pool};
 use diesel::PgConnection;
 use rocket::fairing::AdHoc;
@@ -72,8 +74,19 @@ async fn rocket() -> _ {
     let gc_pool = pool.clone();
     let gc_storage = storage.clone();
 
+    // Configure Rocket with host/port from config
+    let address: IpAddr = config
+        .rocket
+        .host
+        .parse()
+        .expect("Invalid rocket.host address");
+
+    let figment = rocket::Config::figment()
+        .merge(("address", address))
+        .merge(("port", config.rocket.port));
+
     // Build Rocket instance
-    rocket::build()
+    rocket::custom(figment)
         .manage(Database(pool))
         .manage(storage)
         .manage(token_store)

@@ -6,7 +6,7 @@
 use std::sync::atomic::{AtomicU16, Ordering};
 
 use crate::auth::TokenStore;
-use crate::config::{Config, DbConfig, HapiConfig, TokenConfig};
+use crate::config::{Config, DbConfig, RocketConfig, TokenConfig};
 use crate::crypto::NixSigningKey;
 use crate::db::Database;
 use crate::storage::Storage;
@@ -146,7 +146,7 @@ impl TestServerBuilder {
 
         // Create config
         let config = Config {
-            hapi: HapiConfig {
+            rocket: RocketConfig {
                 host: "127.0.0.1".to_string(),
                 port,
             },
