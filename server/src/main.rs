@@ -1,27 +1,18 @@
 #[macro_use]
 extern crate rocket;
 
-mod auth;
-mod config;
-mod crypto;
-mod db;
-mod error;
-mod gc;
-mod models;
-mod routes;
-mod schema;
-mod storage;
-
 use diesel::r2d2::{ConnectionManager, Pool};
 use diesel::PgConnection;
 use rocket::fairing::AdHoc;
 use rocket::tokio;
 use tracing_subscriber::EnvFilter;
 
-use auth::TokenStore;
-use config::Config;
-use db::Database;
-use storage::Storage;
+use xzar_server::auth::TokenStore;
+use xzar_server::config::Config;
+use xzar_server::db::{self, Database};
+use xzar_server::gc;
+use xzar_server::routes;
+use xzar_server::storage::Storage;
 
 #[launch]
 async fn rocket() -> _ {

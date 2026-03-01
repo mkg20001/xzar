@@ -5,9 +5,17 @@ edition = "2021"
 description = "A pinning-based Nix cache server"
 license = "MIT"
 
+[lib]
+name = "xzar_server"
+path = "src/lib.rs"
+
 [[bin]]
 name = "xzar-server"
 path = "src/main.rs"
+
+[features]
+default = []
+test_harness = ["dep:tempfile"]
 
 [dependencies]
 # Web framework
@@ -59,6 +67,9 @@ multer = "3"
 # Async utilities
 futures = "0.3"
 tokio-util = { version = "0.7", features = ["io"] }
+
+# Test harness (optional)
+tempfile = { version = "3", optional = true }
 
 [dev-dependencies]
 tempfile = "3"

@@ -148,21 +148,212 @@ impl NixSigningKey {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use ed25519_dalek::{SigningKey, Verifier};
 
     #[test]
-    fn test_nix_base32() {
-        // Test vector: sha256 hash converted to nix base32
-        let bytes = [0u8; 32]; // All zeros
+    fn test_nix_base32_zeros() {
+        // All zeros should produce all '0's in nix base32
+        let bytes = [0u8; 32];
         let result = bytes_to_nix_base32(&bytes);
         assert_eq!(result.len(), 52); // SHA256 produces 52 char base32
+        assert!(result.chars().all(|c| c == '0'));
     }
 
     #[test]
-    fn test_sri_to_nix_hash() {
-        // sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA= (all zeros)
+    fn test_nix_base32_ones() {
+        // All 0xFF should produce all 'z's in nix base32
+        let bytes = [0xFFu8; 32];
+        let result = bytes_to_nix_base32(&bytes);
+        assert_eq!(result.len(), 52);
+        // Last char depends on padding, but most should be 'z'
+        assert!(result.chars().filter(|&c| c == 'z').count() > 45);
+    }
+
+    #[test]
+    fn test_nix_base32_length() {
+        // Test various hash sizes
+        assert_eq!(nix_base32_len(20), 32);  // SHA1
+        assert_eq!(nix_base32_len(32), 52);  // SHA256
+        assert_eq!(nix_base32_len(64), 103); // SHA512
+    }
+
+    #[test]
+    fn test_nix_base32_alphabet() {
+        // Verify output only uses valid nix base32 chars
+        let bytes: Vec<u8> = (0..32).collect();
+        let result = bytes_to_nix_base32(&bytes);
+        let valid_chars = "0123456789abcdfghijklmnpqrsvwxyz";
+        assert!(result.chars().all(|c| valid_chars.contains(c)));
+    }
+
+    #[test]
+    fn test_sri_to_nix_hash_sha256() {
         let (algo, hash) = sri_to_nix_hash("sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=")
             .unwrap();
         assert_eq!(algo, "sha256");
         assert_eq!(hash.len(), 52);
+    }
+
+    #[test]
+    fn test_sri_to_nix_hash_sha512() {
+        // SHA512 all zeros
+        let b64 = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA==";
+        let (algo, hash) = sri_to_nix_hash(&format!("sha512-{}", b64)).unwrap();
+        assert_eq!(algo, "sha512");
+        assert_eq!(hash.len(), 103);
+    }
+
+    #[test]
+    fn test_sri_to_nix_hash_invalid() {
+        assert!(sri_to_nix_hash("invalid").is_err());
+        assert!(sri_to_nix_hash("md5-AAAA").is_err());
+        assert!(sri_to_nix_hash("sha256-!!!invalid!!!").is_err());
+    }
+
+    #[test]
+    fn test_base64_to_nix_base32() {
+        let result = base64_to_nix_base32("AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=").unwrap();
+        assert_eq!(result.len(), 52);
+    }
+
+    #[test]
+    fn test_fingerprint_no_refs() {
+        let fp = fingerprint(
+            "abc123-test-1.0",
+            "sha256:0000000000000000000000000000000000000000000000000000",
+            12345,
+            &[],
+        );
+        assert_eq!(
+            fp,
+            "1;/nix/store/abc123-test-1.0;sha256:0000000000000000000000000000000000000000000000000000;12345;"
+        );
+    }
+
+    #[test]
+    fn test_fingerprint_with_refs() {
+        let fp = fingerprint(
+            "abc123-test-1.0",
+            "sha256:0000000000000000000000000000000000000000000000000000",
+            12345,
+            &["ref1-lib-1.0".to_string(), "ref2-lib-2.0".to_string()],
+        );
+        assert!(fp.contains("/nix/store/ref1-lib-1.0"));
+        assert!(fp.contains("/nix/store/ref2-lib-2.0"));
+        assert!(fp.contains(","));
+    }
+
+    #[test]
+    fn test_signing_key_from_config() {
+        // Generate a test key
+        let secret = [0x42u8; 32];
+        let _signing_key = SigningKey::from_bytes(&secret);
+        let key_b64 = BASE64_STANDARD.encode(&secret);
+        let config_str = format!("test-key-1:{}", key_b64);
+
+        let nix_key = NixSigningKey::from_config(&config_str).unwrap();
+        assert_eq!(nix_key.name, "test-key-1");
+    }
+
+    #[test]
+    fn test_signing_key_invalid_format() {
+        assert!(NixSigningKey::from_config("no-colon").is_err());
+        assert!(NixSigningKey::from_config("key:!!!invalid-base64!!!").is_err());
+        assert!(NixSigningKey::from_config("key:AAAA").is_err()); // Too short
+    }
+
+    #[test]
+    fn test_sign_message() {
+        let secret = [0x42u8; 32];
+        let key_b64 = BASE64_STANDARD.encode(&secret);
+        let config_str = format!("test-key:{}", key_b64);
+
+        let nix_key = NixSigningKey::from_config(&config_str).unwrap();
+        let signature = nix_key.sign("hello world");
+
+        // Verify format: "keyname:base64signature"
+        assert!(signature.starts_with("test-key:"));
+        let sig_b64 = signature.strip_prefix("test-key:").unwrap();
+        let sig_bytes = BASE64_STANDARD.decode(sig_b64).unwrap();
+        assert_eq!(sig_bytes.len(), 64); // Ed25519 signature is 64 bytes
+    }
+
+    #[test]
+    fn test_sign_and_verify() {
+        use ed25519_dalek::Signature;
+
+        // Generate a test key
+        let secret = [0x42u8; 32];
+        let signing_key = SigningKey::from_bytes(&secret);
+        let verifying_key = signing_key.verifying_key();
+
+        let key_b64 = BASE64_STANDARD.encode(&secret);
+        let config_str = format!("test-key:{}", key_b64);
+
+        let nix_key = NixSigningKey::from_config(&config_str).unwrap();
+
+        // Sign a message
+        let message = "test message to sign";
+        let signature_str = nix_key.sign(message);
+
+        // Extract and verify signature
+        let sig_b64 = signature_str.strip_prefix("test-key:").unwrap();
+        let sig_bytes = BASE64_STANDARD.decode(sig_b64).unwrap();
+        let signature = Signature::from_slice(&sig_bytes).unwrap();
+
+        // Verify should succeed
+        assert!(verifying_key.verify(message.as_bytes(), &signature).is_ok());
+
+        // Verify with wrong message should fail
+        assert!(verifying_key.verify(b"wrong message", &signature).is_err());
+    }
+
+    #[test]
+    fn test_sign_drv() {
+        let secret = [0x42u8; 32];
+        let key_b64 = BASE64_STANDARD.encode(&secret);
+        let config_str = format!("cache.example.com-1:{}", key_b64);
+
+        let nix_key = NixSigningKey::from_config(&config_str).unwrap();
+
+        let signature = nix_key.sign_drv(
+            "abc123-package-1.0",
+            "sha256:0000000000000000000000000000000000000000000000000000",
+            1024,
+            &["dep1-lib".to_string()],
+        );
+
+        assert!(signature.starts_with("cache.example.com-1:"));
+        let sig_b64 = signature.strip_prefix("cache.example.com-1:").unwrap();
+        assert!(BASE64_STANDARD.decode(sig_b64).is_ok());
+    }
+
+    #[test]
+    fn test_signature_deterministic() {
+        let secret = [0x42u8; 32];
+        let key_b64 = BASE64_STANDARD.encode(&secret);
+        let config_str = format!("test:{}", key_b64);
+
+        let nix_key = NixSigningKey::from_config(&config_str).unwrap();
+
+        let sig1 = nix_key.sign("same message");
+        let sig2 = nix_key.sign("same message");
+
+        // Ed25519 signatures are deterministic
+        assert_eq!(sig1, sig2);
+    }
+
+    #[test]
+    fn test_different_messages_different_signatures() {
+        let secret = [0x42u8; 32];
+        let key_b64 = BASE64_STANDARD.encode(&secret);
+        let config_str = format!("test:{}", key_b64);
+
+        let nix_key = NixSigningKey::from_config(&config_str).unwrap();
+
+        let sig1 = nix_key.sign("message 1");
+        let sig2 = nix_key.sign("message 2");
+
+        assert_ne!(sig1, sig2);
     }
 }
