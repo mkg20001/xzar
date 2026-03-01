@@ -110,6 +110,8 @@ struct TestServerProcess {
     process: std::process::Child,
     port: u16,
     upload_token: String,
+    signing_secret: [u8; 32],
+    key_name: String,
     _storage_dir: TempDir,
     _config_dir: TempDir,
 }
@@ -126,11 +128,12 @@ impl TestServerProcess {
 
         // Generate a signing key (32 bytes, base64 encoded)
         let signing_secret: [u8; 32] = rand::random();
+        let key_name = "test-cache".to_string();
         let signing_key_b64 = base64::Engine::encode(
             &base64::engine::general_purpose::STANDARD,
             signing_secret,
         );
-        let signing_key = format!("test-cache:{}", signing_key_b64);
+        let signing_key = format!("{}:{}", key_name, signing_key_b64);
 
         // Create config file
         let config_path = config_dir.path().join("config.yaml");
@@ -177,9 +180,24 @@ rocket:
             process,
             port,
             upload_token,
+            signing_secret,
+            key_name,
             _storage_dir: storage_dir,
             _config_dir: config_dir,
         }
+    }
+
+    /// Get the public key in Nix format (keyname:base64pubkey)
+    /// Used for trusted-public-keys configuration
+    fn public_key(&self) -> String {
+        use ed25519_dalek::SigningKey;
+        let signing_key = SigningKey::from_bytes(&self.signing_secret);
+        let verifying_key = signing_key.verifying_key();
+        let pub_b64 = base64::Engine::encode(
+            &base64::engine::general_purpose::STANDARD,
+            verifying_key.as_bytes(),
+        );
+        format!("{}:{}", self.key_name, pub_b64)
     }
 
     /// Wait for server to be ready
@@ -497,4 +515,156 @@ async fn test_client_invalid_auth() {
 
     // Should fail due to auth error
     assert!(!output.status.success());
+}
+
+/// Test uploading a package and fetching it with nix-store --realise
+///
+/// This test:
+/// 1. Builds a simple nix package (hello)
+/// 2. Uploads it to the xzar server using the client
+/// 3. Creates a temporary Nix store
+/// 4. Uses nix-store --realise to fetch the package from the server
+/// 5. Verifies the package was downloaded correctly
+#[tokio::test]
+#[ignore] // Requires nix and a database
+async fn test_nix_store_realise_from_cache() {
+    if !database_available() {
+        eprintln!("Skipping test: no database configured");
+        return;
+    }
+
+    if !nix_available() {
+        eprintln!("Skipping test: nix not available");
+        return;
+    }
+
+    // Build hello package
+    let build_output = Command::new("nix-build")
+        .args(["<nixpkgs>", "-A", "hello", "--no-out-link"])
+        .output()
+        .expect("Failed to run nix-build");
+
+    if !build_output.status.success() {
+        panic!(
+            "nix-build failed: {}",
+            String::from_utf8_lossy(&build_output.stderr)
+        );
+    }
+
+    let store_path = String::from_utf8_lossy(&build_output.stdout)
+        .trim()
+        .to_string();
+
+    eprintln!("Built: {}", store_path);
+
+    // Start server
+    let mut server = TestServerProcess::start();
+    if !server.wait_ready().await {
+        panic!("Server failed to start");
+    }
+
+    let public_key = server.public_key();
+    eprintln!("Server public key: {}", public_key);
+
+    // Upload the package using xzar client
+    let output = Command::new(client_binary())
+        .args([
+            "--server",
+            &server.url(),
+            "--key",
+            &server.upload_token,
+            "--pin",
+            "test-realise",
+            &store_path,
+        ])
+        .output()
+        .expect("Failed to run xzar");
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    eprintln!("Upload stdout: {}", stdout);
+    eprintln!("Upload stderr: {}", stderr);
+
+    if !output.status.success() {
+        panic!("xzar upload failed: {}", stderr);
+    }
+
+    // Create a temporary Nix store for testing
+    let temp_store = TempDir::new().expect("Failed to create temp store dir");
+    let store_root = temp_store.path();
+    let nix_store_path = store_root.join("nix/store");
+    std::fs::create_dir_all(&nix_store_path).expect("Failed to create nix/store dir");
+
+    // Extract the hash part of the store path for nix-store --realise
+    // Store path format: /nix/store/<hash>-<name>
+    let path_name = store_path
+        .strip_prefix("/nix/store/")
+        .expect("Invalid store path");
+
+    eprintln!("Attempting to fetch {} from cache", path_name);
+    eprintln!("Using store root: {}", store_root.display());
+
+    // Use nix-store --realise to fetch from the cache
+    // We use --store to specify a local store with a custom root
+    let store_url = format!("local?root={}", store_root.display());
+    let substituters = server.url();
+
+    let realise_output = Command::new("nix-store")
+        .args([
+            "--realise",
+            &store_path,
+            "--store",
+            &store_url,
+            "--option",
+            "substituters",
+            &substituters,
+            "--option",
+            "trusted-public-keys",
+            &public_key,
+            "--option",
+            "require-sigs",
+            "true",
+            "--option",
+            "narinfo-cache-negative-ttl",
+            "0",
+        ])
+        .output()
+        .expect("Failed to run nix-store --realise");
+
+    let realise_stdout = String::from_utf8_lossy(&realise_output.stdout);
+    let realise_stderr = String::from_utf8_lossy(&realise_output.stderr);
+
+    eprintln!("nix-store --realise stdout: {}", realise_stdout);
+    eprintln!("nix-store --realise stderr: {}", realise_stderr);
+
+    assert!(
+        realise_output.status.success(),
+        "nix-store --realise failed: {}",
+        realise_stderr
+    );
+
+    // Verify the path exists in our temp store
+    let fetched_path = nix_store_path.join(path_name);
+    assert!(
+        fetched_path.exists(),
+        "Fetched path {} does not exist",
+        fetched_path.display()
+    );
+
+    // Verify it's a directory (hello package should have bin/, etc.)
+    assert!(
+        fetched_path.is_dir(),
+        "Fetched path {} is not a directory",
+        fetched_path.display()
+    );
+
+    // Check for the hello binary
+    let hello_bin = fetched_path.join("bin/hello");
+    assert!(
+        hello_bin.exists(),
+        "hello binary {} does not exist",
+        hello_bin.display()
+    );
+
+    eprintln!("Successfully fetched {} from cache!", path_name);
 }

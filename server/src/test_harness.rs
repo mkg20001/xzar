@@ -14,6 +14,7 @@ use crate::storage::Storage;
 use base64::prelude::*;
 use diesel::r2d2::{ConnectionManager, Pool};
 use diesel::PgConnection;
+use ed25519_dalek::SigningKey;
 use rand::RngCore;
 use rocket::local::asynchronous::Client;
 use sha2::{Digest, Sha512};
@@ -68,6 +69,23 @@ impl TestCredentials {
     /// Get the NixSigningKey from these credentials
     pub fn nix_signing_key(&self) -> NixSigningKey {
         NixSigningKey::from_config(&self.signing_key).unwrap()
+    }
+
+    /// Get the public key in Nix format (keyname:base64pubkey)
+    /// Used for trusted-public-keys configuration
+    pub fn public_key(&self) -> String {
+        // Parse the signing key to get the secret bytes
+        let parts: Vec<&str> = self.signing_key.splitn(2, ':').collect();
+        let secret_bytes = BASE64_STANDARD.decode(parts[1]).unwrap();
+
+        // Create signing key and get verifying (public) key
+        let secret: [u8; 32] = secret_bytes[..32].try_into().unwrap();
+        let signing_key = SigningKey::from_bytes(&secret);
+        let verifying_key = signing_key.verifying_key();
+
+        // Format as "keyname:base64(pubkey)"
+        let pub_b64 = BASE64_STANDARD.encode(verifying_key.as_bytes());
+        format!("{}:{}", self.key_name, pub_b64)
     }
 }
 
