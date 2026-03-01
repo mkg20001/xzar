@@ -1,5 +1,5 @@
 {
-  description = "xzar-server - A Nix binary cache server";
+  description = "xzar - A Nix binary cache server and client";
 
   inputs = {
     nixpkgs.url = "github:nixos/nixpkgs/nixpkgs-unstable";
@@ -20,6 +20,21 @@
         rustToolchain = pkgs.rust-bin.stable.latest.default.override {
           extensions = [ "rust-src" "rust-analyzer" ];
         };
+
+        commonBuildInputs = with pkgs; [
+          pkg-config
+        ];
+
+        # Common Rust package build settings
+        buildRustPackage = { pname, cargoBuildFlags ? [], buildInputs ? [], ... }@args:
+          pkgs.rustPlatform.buildRustPackage (args // {
+            inherit pname;
+            version = "0.1.0";
+            src = ./.;
+            cargoLock.lockFile = ./Cargo.lock;
+            nativeBuildInputs = commonBuildInputs;
+            inherit buildInputs cargoBuildFlags;
+          });
       in
       {
         devShells.default = pkgs.mkShell {
@@ -28,29 +43,49 @@
             pkg-config
             postgresql
             diesel-cli
+            # For client compression
+            xz
+            pixz
           ];
 
           RUST_SRC_PATH = "${rustToolchain}/lib/rustlib/src/rust/library";
         };
 
-        packages.default = pkgs.rustPlatform.buildRustPackage {
-          pname = "xzar-server";
-          version = "0.1.0";
-          src = ./.;
-          cargoLock.lockFile = ./Cargo.lock;
-
-          nativeBuildInputs = with pkgs; [
-            pkg-config
-          ];
-
-          buildInputs = with pkgs; [
-            postgresql.lib
-          ];
-
-          meta = with pkgs.lib; {
-            description = "A pinning-based Nix cache server";
-            license = licenses.mit;
+        packages = {
+          # Server package
+          xzar-server = buildRustPackage {
+            pname = "xzar-server";
+            cargoBuildFlags = [ "-p" "xzar-server" ];
+            buildInputs = with pkgs; [
+              postgresql.lib
+            ];
+            meta = with pkgs.lib; {
+              description = "A pinning-based Nix cache server";
+              license = licenses.mit;
+            };
           };
+
+          # Client package
+          xzar-client = buildRustPackage {
+            pname = "xzar-client";
+            cargoBuildFlags = [ "-p" "xzar-client" ];
+            buildInputs = with pkgs; [
+              xz
+            ];
+            # Client needs nix-store and xz/pixz at runtime
+            postInstall = ''
+              wrapProgram $out/bin/xzar \
+                --prefix PATH : ${pkgs.lib.makeBinPath [ pkgs.nix pkgs.xz pkgs.pixz ]}
+            '';
+            nativeBuildInputs = commonBuildInputs ++ [ pkgs.makeWrapper ];
+            meta = with pkgs.lib; {
+              description = "CLI client for xzar Nix binary cache";
+              license = licenses.mpl20;
+            };
+          };
+
+          # Default is server
+          default = self.packages.${system}.xzar-server;
         };
       }
     ) // {
