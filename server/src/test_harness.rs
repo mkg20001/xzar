@@ -6,7 +6,7 @@
 use std::sync::atomic::{AtomicU16, Ordering};
 
 use crate::auth::TokenStore;
-use crate::config::{Config, DbConfig, RocketConfig, TokenConfig};
+use crate::config::{Config, CorsConfig, DbConfig, RocketConfig, TokenConfig};
 use crate::crypto::NixSigningKey;
 use crate::db::Database;
 use crate::storage::Storage;
@@ -168,6 +168,7 @@ impl TestServerBuilder {
                 host: "127.0.0.1".to_string(),
                 port,
             },
+            cors: CorsConfig::default(),
             storage: storage_path.clone(),
             tokens: vec![TokenConfig::Hashed {
                 hashed: credentials.token_hash.clone(),

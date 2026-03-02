@@ -1,6 +1,7 @@
 # Custom
 config.yaml
 result
+tailwind.css
 
 # Rust
 /target
@@ -11,3 +12,6 @@ result
 .vscode/
 *.swp
 *.swo
+
+# Node
+node_modules

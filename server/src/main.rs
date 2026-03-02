@@ -87,22 +87,35 @@ async fn rocket() -> _ {
         .merge(("address", address))
         .merge(("port", config.rocket.port));
 
-    // Configure CORS
-    let cors = CorsOptions::default()
-        .allowed_origins(AllowedOrigins::all())
-        .allowed_methods(
-            vec![Method::Get, Method::Post, Method::Delete, Method::Options]
-                .into_iter()
-                .map(From::from)
-                .collect(),
-        )
-        .allow_credentials(true)
-        .to_cors()
-        .expect("Failed to create CORS configuration");
-
     // Build Rocket instance
-    rocket::custom(figment)
-        .attach(cors)
+    let mut rocket = rocket::custom(figment);
+
+    // Configure CORS if enabled
+    if config.cors.enabled {
+        let allowed_origins = if config.cors.origins.is_empty() {
+            AllowedOrigins::all()
+        } else {
+            let origins: Vec<&str> = config.cors.origins.iter().map(|s| s.as_str()).collect();
+            AllowedOrigins::some_exact(&origins)
+        };
+
+        let cors = CorsOptions::default()
+            .allowed_origins(allowed_origins)
+            .allowed_methods(
+                vec![Method::Get, Method::Post, Method::Delete, Method::Options]
+                    .into_iter()
+                    .map(From::from)
+                    .collect(),
+            )
+            .allow_credentials(true)
+            .to_cors()
+            .expect("Failed to create CORS configuration");
+
+        rocket = rocket.attach(cors);
+        tracing::info!("CORS enabled");
+    }
+
+    rocket
         .manage(Database(pool))
         .manage(storage)
         .manage(token_store)

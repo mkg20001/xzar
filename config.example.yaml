@@ -2,6 +2,11 @@ rocket:
   host: '::'
   port: 17788
 
+# CORS configuration for web UI access
+cors:
+  enabled: false
+  # origins: ['http://localhost:8080']  # Leave empty for all origins
+
 storage: '/storage/cache'
 
 tokens:

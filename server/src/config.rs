@@ -8,6 +8,8 @@ use crate::error::{AppError, Result};
 pub struct Config {
     #[serde(default)]
     pub rocket: RocketConfig,
+    #[serde(default)]
+    pub cors: CorsConfig,
     pub storage: String,
     #[serde(default)]
     pub tokens: Vec<TokenConfig>,
@@ -44,6 +46,25 @@ fn default_host() -> String {
 
 fn default_port() -> u16 {
     17788
+}
+
+#[derive(Debug, Deserialize, Clone)]
+pub struct CorsConfig {
+    /// Enable CORS (default: false)
+    #[serde(default)]
+    pub enabled: bool,
+    /// Allowed origins (default: ["*"] if enabled)
+    #[serde(default)]
+    pub origins: Vec<String>,
+}
+
+impl Default for CorsConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            origins: Vec::new(),
+        }
+    }
 }
 
 #[derive(Debug, Deserialize, Clone)]

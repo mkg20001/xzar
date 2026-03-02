@@ -148,23 +148,31 @@ pub fn list_pins(_auth: AuthenticatedUser, db: Db) -> Result<Json<Vec<PinWithRoo
 }
 
 /// DELETE /pins/<id>
-/// Abandon a pin (mark as abandoned and set expires to now)
+/// Abandon a pin (mark as abandoned and set expires based on leave_after_abandon)
 #[delete("/pins/<id>")]
 pub fn abandon_pin(_auth: AuthenticatedUser, db: Db, id: i32) -> Result<Json<bool>> {
     let mut conn = db.0;
 
+    // First fetch the pin to get leave_after_abandon
+    let pin: Pin = pins::table
+        .filter(pins::id.eq(id))
+        .first(&mut conn)
+        .map_err(|_| AppError::NotFound("Pin not found".to_string()))?;
+
     let now = Utc::now().naive_utc();
 
-    let updated = diesel::update(pins::table.filter(pins::id.eq(id)))
+    // Calculate expires: now + leave_after_abandon (in milliseconds), or now if not set
+    let expires = match pin.leave_after_abandon {
+        Some(ms) => now + Duration::milliseconds(ms),
+        None => now,
+    };
+
+    diesel::update(pins::table.filter(pins::id.eq(id)))
         .set(UpdatePin {
             abandoned: Some(true),
-            expires: Some(Some(now)),
+            expires: Some(Some(expires)),
         })
         .execute(&mut conn)?;
-
-    if updated == 0 {
-        return Err(AppError::NotFound("Pin not found".to_string()));
-    }
 
     Ok(Json(true))
 }
