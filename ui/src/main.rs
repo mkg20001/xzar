@@ -1,3 +1,5 @@
+use std::collections::BTreeMap;
+
 use dioxus::prelude::*;
 use serde::{Deserialize, Serialize};
 
@@ -25,6 +27,25 @@ struct Pin {
     abandoned: bool,
     leave_after_abandon: Option<i64>,
     roots: Vec<PinRoot>,
+}
+
+/// Group pins by name, with non-abandoned pins first in each group
+fn group_pins(pins: &[Pin]) -> Vec<(String, Vec<Pin>)> {
+    let mut groups: BTreeMap<String, Vec<Pin>> = BTreeMap::new();
+
+    for pin in pins {
+        groups.entry(pin.name.clone()).or_default().push(pin.clone());
+    }
+
+    // Sort each group: non-abandoned first
+    for pins in groups.values_mut() {
+        pins.sort_by_key(|p| p.abandoned);
+    }
+
+    // Convert to vec, sorted by whether the first pin is abandoned (active groups first)
+    let mut result: Vec<_> = groups.into_iter().collect();
+    result.sort_by_key(|(_, pins)| pins.first().is_some_and(|p| p.abandoned));
+    result
 }
 
 async fn fetch_pins(server_url: &str, token: &str) -> Result<Vec<Pin>, String> {
@@ -194,15 +215,15 @@ fn App() -> Element {
                                 "No pins found"
                             }
                         } else {
-                            div { class: "space-y-4",
-                                for pin in pins.read().iter() {
-                                    PinCard {
-                                        key: "{pin.id}",
-                                        pin: pin.clone(),
+                            div { class: "space-y-6",
+                                for (name, group) in group_pins(&pins.read()) {
+                                    PinGroup {
+                                        key: "{name}",
+                                        name: name,
+                                        pins: group,
                                         server_url: server_url.read().clone(),
                                         token: token.read().clone(),
-                                        on_abandoned: move |_| async move {
-                                            // Refresh pins after abandoning
+                                        on_refresh: move |_| async move {
                                             if let Ok(fetched_pins) = fetch_pins(&server_url.read(), &token.read()).await {
                                                 pins.set(fetched_pins);
                                             }
@@ -210,6 +231,46 @@ fn App() -> Element {
                                     }
                                 }
                             }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[component]
+fn PinGroup(
+    name: String,
+    pins: Vec<Pin>,
+    server_url: String,
+    token: String,
+    on_refresh: EventHandler<()>,
+) -> Element {
+    let has_abandoned = pins.iter().any(|p| p.abandoned);
+    let abandoned_count = pins.iter().filter(|p| p.abandoned).count();
+
+    rsx! {
+        div { class: "border border-gray-200 rounded-lg overflow-hidden",
+            div { class: "bg-gray-50 px-4 py-3 border-b border-gray-200",
+                div { class: "flex justify-between items-center",
+                    h3 { class: "text-lg font-semibold text-gray-800", "{name}" }
+                    if has_abandoned {
+                        span { class: "text-xs text-gray-500",
+                            "{abandoned_count} abandoned"
+                        }
+                    }
+                }
+            }
+            div { class: "divide-y divide-gray-100",
+                for pin in pins.iter() {
+                    PinCard {
+                        key: "{pin.id}",
+                        pin: pin.clone(),
+                        server_url: server_url.clone(),
+                        token: token.clone(),
+                        on_abandoned: move |_| {
+                            on_refresh.call(());
                         }
                     }
                 }
@@ -269,13 +330,14 @@ fn PinCard(
         "Active"
     };
 
+    let bg_class = if pin.abandoned { "bg-gray-50" } else { "bg-white" };
+
     rsx! {
-        div { class: "border border-gray-200 rounded-lg p-4 hover:shadow-md transition-shadow",
+        div { class: "p-4 {bg_class}",
             div { class: "flex justify-between items-start mb-3",
                 div {
-                    h3 { class: "text-lg font-medium text-gray-800", "{pin.name}" }
                     if let Some(desc) = &pin.description {
-                        p { class: "text-sm text-gray-500 mt-1", "{desc}" }
+                        p { class: "text-sm text-gray-500", "{desc}" }
                     }
                 }
                 div { class: "flex items-center gap-2",

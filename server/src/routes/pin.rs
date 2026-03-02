@@ -111,9 +111,9 @@ pub fn finalize_pin(
 pub fn list_pins(_auth: AuthenticatedUser, db: Db) -> Result<Json<Vec<PinWithRoots>>> {
     let mut conn = db.0;
 
-    // Get all pins ordered by created desc
+    // Get all pins ordered by expires ASC (nulls last)
     let all_pins: Vec<Pin> = pins::table
-        .order(pins::created.desc())
+        .order((pins::expires.asc(), pins::created.desc()))
         .load(&mut conn)?;
 
     // For each pin, get its roots
@@ -158,6 +158,10 @@ pub fn abandon_pin(_auth: AuthenticatedUser, db: Db, id: i32) -> Result<Json<boo
         .filter(pins::id.eq(id))
         .first(&mut conn)
         .map_err(|_| AppError::NotFound("Pin not found".to_string()))?;
+
+    if pin.abandoned {
+        return Err(AppError::BadRequest("Pin is already abandoned".to_string()));
+    }
 
     let now = Utc::now().naive_utc();
 
