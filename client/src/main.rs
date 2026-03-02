@@ -167,11 +167,14 @@ async fn main() -> Result<()> {
     // Finalize the pin
     println!("Finalizing pin '{}'...", args.pin);
 
-    // Get root paths (basenames)
+    // Get root paths (basenames) - resolve symlinks to get actual store paths
     let roots: Vec<String> = paths
         .iter()
-        .filter_map(|p| p.file_name())
-        .map(|s| s.to_string_lossy().to_string())
+        .filter_map(|p| {
+            // Resolve symlink if it is one, otherwise use the path as-is
+            let resolved = std::fs::canonicalize(p).unwrap_or_else(|_| p.clone());
+            resolved.file_name().map(|s| s.to_string_lossy().to_string())
+        })
         .collect();
 
     api.finalize_pin(&args.pin, args.desc.as_deref(), &roots, expires, leave_after_abandon)

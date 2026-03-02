@@ -1,3 +1,5 @@
+use std::path::Path;
+
 use diesel::prelude::*;
 use rocket::post;
 use rocket::serde::json::Json;
@@ -7,6 +9,19 @@ use crate::db::Db;
 use crate::error::{AppError, Result};
 use crate::models::{CheckRequest, CheckResponse};
 use crate::schema::drvs;
+
+/// Extract drv_id (first 32 chars of basename) from a path
+fn extract_drv_id(path: &str) -> &str {
+    let basename = Path::new(path)
+        .file_name()
+        .and_then(|s| s.to_str())
+        .unwrap_or(path);
+    if basename.len() >= 32 {
+        &basename[..32]
+    } else {
+        basename
+    }
+}
 
 /// POST /check
 /// Check which paths are not in the cache
@@ -27,17 +42,8 @@ pub fn check_paths(
 
     let mut conn = db.0;
 
-    // Extract the drv IDs (first 32 chars of each path)
-    let drv_ids: Vec<&str> = paths
-        .iter()
-        .map(|p| {
-            if p.len() >= 32 {
-                &p[..32]
-            } else {
-                p.as_str()
-            }
-        })
-        .collect();
+    // Extract the drv IDs (first 32 chars of basename)
+    let drv_ids: Vec<&str> = paths.iter().map(|p| extract_drv_id(p)).collect();
 
     // Find existing derivations
     let existing: Vec<String> = drvs::table
@@ -51,10 +57,7 @@ pub fn check_paths(
     // Return paths that are not in the cache
     let need: Vec<String> = paths
         .iter()
-        .filter(|p| {
-            let id = if p.len() >= 32 { &p[..32] } else { p.as_str() };
-            !existing_set.contains(id)
-        })
+        .filter(|p| !existing_set.contains(extract_drv_id(p)))
         .cloned()
         .collect();
 
