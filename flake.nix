@@ -19,6 +19,7 @@
         };
         rustToolchain = pkgs.rust-bin.stable.latest.default.override {
           extensions = [ "rust-src" "rust-analyzer" ];
+          targets = [ "wasm32-unknown-unknown" ];
         };
 
         commonBuildInputs = with pkgs; [
@@ -55,13 +56,21 @@
       {
         devShells.default = pkgs.mkShell {
           buildInputs = with pkgs; [
+            # Rust toolchain
             rustToolchain
+            cargo-watch
+            cargo-edit
+
             pkg-config
             postgresql
             diesel-cli
             # For client compression
             xz
             pixz
+
+            # Dioxus CLI and WASM tools
+            dioxus-cli
+            wasm-bindgen-cli
           ];
 
           RUST_SRC_PATH = "${rustToolchain}/lib/rustlib/src/rust/library";

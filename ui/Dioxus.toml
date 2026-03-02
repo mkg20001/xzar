@@ -9,5 +9,8 @@ title = "xzar - Binary Cache"
 reload_html = true
 watch_path = ["src", "assets"]
 
-[web.resource]
+[web.resource.dev]
+style = ["/assets/tailwind.css"]
+
+[web.resource.release]
 style = ["/assets/tailwind.css"]

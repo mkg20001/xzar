@@ -3,9 +3,10 @@ rocket:
   port: 17788
 
 # CORS configuration for web UI access
+# This is mostly for development, but can also be used in production
 cors:
-  enabled: false
-  # origins: ['http://localhost:8080']  # Leave empty for all origins
+  enabled: true
+# origins: ['http://localhost:8080']  # Leave empty for all origins
 
 storage: '/storage/cache'
 
