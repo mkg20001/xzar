@@ -1,0 +1,12 @@
+{
+  "name": "xzar-ui",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "tailwind": "tailwindcss -i input.css -o assets/tailwind.css",
+    "tailwind:watch": "tailwindcss -i input.css -o assets/tailwind.css --watch"
+  },
+  "devDependencies": {
+    "tailwindcss": "^3"
+  }
+}
