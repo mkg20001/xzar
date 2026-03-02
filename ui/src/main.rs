@@ -1,6 +1,8 @@
 use dioxus::prelude::*;
 use serde::{Deserialize, Serialize};
 
+const TAILWIND_CSS: &str = include_str!("../assets/tailwind.css");
+
 fn main() {
     dioxus::launch(App);
 }
@@ -108,6 +110,7 @@ fn App() -> Element {
     };
 
     rsx! {
+        document::Style { {TAILWIND_CSS} }
         div { class: "min-h-screen bg-gray-100 py-8",
             div { class: "max-w-6xl mx-auto px-4",
                 h1 { class: "text-3xl font-bold text-gray-800 mb-8", "xzar Binary Cache" }
