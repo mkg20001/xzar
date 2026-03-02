@@ -23,10 +23,10 @@ Update `config.yaml` with your settings:
 
 ```bash
 # Build and run
-nix develop --command cargo run -p xzar-server
+nix develop --command cargo watch -- cargo run --bin xzar-server
 
 # Or with a custom config path
-XZAR_CONFIG=/path/to/config.yaml nix develop --command cargo run -p xzar-server
+XZAR_CONFIG=/path/to/config.yaml nix develop --command cargo watch -- cargo run --bin xzar-server
 ```
 
 ## Web UI
