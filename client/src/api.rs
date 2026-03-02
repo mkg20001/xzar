@@ -46,6 +46,26 @@ struct FinalizePinRequest {
     leave_after_abandon: Option<u64>,
 }
 
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PinRoot {
+    pub drv_id: String,
+    pub drv_full: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PinResponse {
+    pub id: i32,
+    pub name: String,
+    pub description: Option<String>,
+    pub created: String,
+    pub expires: Option<String>,
+    pub abandoned: bool,
+    pub leave_after_abandon: Option<i64>,
+    pub roots: Vec<PinRoot>,
+}
+
 #[derive(Clone)]
 pub struct ApiClient {
     client: Client,
@@ -265,5 +285,17 @@ impl ApiClient {
 
         let pin_id: i32 = self.handle_response(response).await?;
         Ok(pin_id)
+    }
+
+    /// List all pins
+    pub async fn list_pins(&self) -> Result<Vec<PinResponse>> {
+        let response = self.client
+            .get(format!("{}/pins", self.base_url))
+            .header("Authorization", format!("Bearer {}", self.key))
+            .send()
+            .await
+            .context("Failed to list pins")?;
+
+        self.handle_response(response).await
     }
 }

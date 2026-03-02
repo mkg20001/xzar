@@ -261,7 +261,8 @@ fn test_client_help() {
     assert!(stdout.contains("xzar"));
     assert!(stdout.contains("--server"));
     assert!(stdout.contains("--key"));
-    assert!(stdout.contains("--pin"));
+    assert!(stdout.contains("upload"));
+    assert!(stdout.contains("list"));
 }
 
 #[test]
@@ -286,8 +287,8 @@ fn test_client_missing_required_args() {
     assert!(!output.status.success());
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(
-        stderr.contains("--server") || stderr.contains("required"),
-        "Should mention missing required arguments"
+        stderr.contains("--server") || stderr.contains("required") || stderr.contains("Usage"),
+        "Should mention missing required arguments or show usage"
     );
 }
 
@@ -310,6 +311,7 @@ async fn test_client_no_paths_error() {
             &server.url(),
             "--key",
             &server.upload_token,
+            "upload",
             "--pin",
             "test-pin",
         ])
@@ -369,6 +371,7 @@ async fn test_client_upload_hello() {
             &server.url(),
             "--key",
             &server.upload_token,
+            "upload",
             "--pin",
             "test-hello",
             &store_path,
@@ -436,6 +439,7 @@ async fn test_client_stdin_paths() {
             &server.url(),
             "--key",
             &server.upload_token,
+            "upload",
             "--pin",
             "test-stdin",
         ])
@@ -476,6 +480,7 @@ async fn test_client_invalid_server() {
             "http://127.0.0.1:1",
             "--key",
             "test-key",
+            "upload",
             "--pin",
             "test-pin",
             "/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-test",
@@ -506,6 +511,7 @@ async fn test_client_invalid_auth() {
             &server.url(),
             "--key",
             "wrong-token",
+            "upload",
             "--pin",
             "test-pin",
             "/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-test",
@@ -573,6 +579,7 @@ async fn test_nix_store_realise_from_cache() {
             &server.url(),
             "--key",
             &server.upload_token,
+            "upload",
             "--pin",
             "test-realise",
             &store_path,

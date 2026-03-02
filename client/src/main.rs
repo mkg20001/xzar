@@ -6,7 +6,7 @@ use std::io::{self, BufRead};
 use std::path::PathBuf;
 
 use anyhow::{Context, Result};
-use clap::Parser;
+use clap::{Parser, Subcommand};
 use indicatif::{ProgressBar, ProgressStyle};
 use tracing_subscriber::EnvFilter;
 
@@ -19,36 +19,48 @@ use crate::upload::UploadManager;
 #[command(name = "xzar", version, about)]
 struct Args {
     /// Cache server URL
-    #[arg(short, long)]
-    server: String,
+    #[arg(short, long, global = true)]
+    server: Option<String>,
 
     /// API authentication key
-    #[arg(short, long)]
-    key: String,
+    #[arg(short, long, global = true)]
+    key: Option<String>,
 
-    /// Pin name to create/update
-    #[arg(short, long)]
-    pin: String,
+    #[command(subcommand)]
+    command: Command,
+}
 
-    /// Description for the pin
-    #[arg(short, long)]
-    desc: Option<String>,
+#[derive(Subcommand, Debug)]
+enum Command {
+    /// Upload paths to the cache and create a pin
+    Upload {
+        /// Pin name to create/update
+        #[arg(short, long)]
+        pin: String,
 
-    /// Use all CPU resources for parallel uploads
-    #[arg(short, long, default_value = "true")]
-    aggressive: bool,
+        /// Description for the pin
+        #[arg(short, long)]
+        desc: Option<String>,
 
-    /// Auto-expiry duration for pin (e.g., "7d", "2w", "1m")
-    #[arg(short, long)]
-    expires: Option<String>,
+        /// Use all CPU resources for parallel uploads
+        #[arg(short, long, default_value = "true")]
+        aggressive: bool,
 
-    /// Duration to leave pin after replacement (e.g., "7d")
-    #[arg(short, long)]
-    leave_after_abandon: Option<String>,
+        /// Auto-expiry duration for pin (e.g., "7d", "2w", "1m")
+        #[arg(short, long)]
+        expires: Option<String>,
 
-    /// Nix store paths to upload
-    #[arg(trailing_var_arg = true)]
-    paths: Vec<PathBuf>,
+        /// Duration to leave pin after replacement (e.g., "7d")
+        #[arg(short, long)]
+        leave_after_abandon: Option<String>,
+
+        /// Nix store paths to upload
+        #[arg(trailing_var_arg = true)]
+        paths: Vec<PathBuf>,
+    },
+
+    /// List all pins on the server
+    List,
 }
 
 fn parse_duration(s: &str) -> Option<u64> {
@@ -88,9 +100,36 @@ async fn main() -> Result<()> {
 
     let args = Args::parse();
 
-    // Collect paths from args and stdin
-    let mut paths: Vec<PathBuf> = args.paths.clone();
+    let server = args.server.ok_or_else(|| anyhow::anyhow!("--server is required"))?;
+    let key = args.key.ok_or_else(|| anyhow::anyhow!("--key is required"))?;
 
+    // Create API client
+    let api = ApiClient::new(&server, &key)?;
+
+    match args.command {
+        Command::Upload {
+            pin,
+            desc,
+            aggressive,
+            expires,
+            leave_after_abandon,
+            paths,
+        } => {
+            cmd_upload(api, pin, desc, aggressive, expires, leave_after_abandon, paths).await
+        }
+        Command::List => cmd_list(api).await,
+    }
+}
+
+async fn cmd_upload(
+    api: ApiClient,
+    pin: String,
+    desc: Option<String>,
+    aggressive: bool,
+    expires: Option<String>,
+    leave_after_abandon: Option<String>,
+    mut paths: Vec<PathBuf>,
+) -> Result<()> {
     // Read from stdin if not a TTY
     if !atty::is(atty::Stream::Stdin) {
         let stdin = io::stdin();
@@ -108,11 +147,11 @@ async fn main() -> Result<()> {
     }
 
     // Parse duration options
-    let expires = args.expires.as_ref().and_then(|s| parse_duration(s));
-    let leave_after_abandon = args.leave_after_abandon.as_ref().and_then(|s| parse_duration(s));
+    let expires = expires.as_ref().and_then(|s| parse_duration(s));
+    let leave_after_abandon = leave_after_abandon.as_ref().and_then(|s| parse_duration(s));
 
     // Determine parallelism
-    let parallelism = if args.aggressive {
+    let parallelism = if aggressive {
         num_cpus::get()
     } else {
         1
@@ -126,9 +165,6 @@ async fn main() -> Result<()> {
         .context("Failed to get Nix store closure")?;
 
     println!("Found {} paths in closure", closure.len());
-
-    // Create API client
-    let api = ApiClient::new(&args.server, &args.key)?;
 
     // Check which paths need to be uploaded
     println!("Checking server for existing paths...");
@@ -155,7 +191,7 @@ async fn main() -> Result<()> {
             nix,
             progress.clone(),
             parallelism,
-            args.aggressive,
+            aggressive,
         );
 
         manager.upload_all(&need).await
@@ -165,7 +201,7 @@ async fn main() -> Result<()> {
     }
 
     // Finalize the pin
-    println!("Finalizing pin '{}'...", args.pin);
+    println!("Finalizing pin '{}'...", pin);
 
     // Get root paths (basenames) - resolve symlinks to get actual store paths
     let roots: Vec<String> = paths
@@ -177,11 +213,51 @@ async fn main() -> Result<()> {
         })
         .collect();
 
-    api.finalize_pin(&args.pin, args.desc.as_deref(), &roots, expires, leave_after_abandon)
+    api.finalize_pin(&pin, desc.as_deref(), &roots, expires, leave_after_abandon)
         .await
         .context("Failed to finalize pin")?;
 
-    println!("Done! Pin '{}' created with {} roots", args.pin, roots.len());
+    println!("Done! Pin '{}' created with {} roots", pin, roots.len());
+
+    Ok(())
+}
+
+async fn cmd_list(api: ApiClient) -> Result<()> {
+    let pins = api.list_pins().await
+        .context("Failed to list pins")?;
+
+    if pins.is_empty() {
+        println!("No pins found.");
+        return Ok(());
+    }
+
+    for pin in pins {
+        let status = if pin.abandoned {
+            "abandoned"
+        } else if pin.expires.is_some() {
+            "expiring"
+        } else {
+            "active"
+        };
+
+        println!("{} ({}) - {} roots [{}]", pin.name, pin.id, pin.roots.len(), status);
+
+        if let Some(desc) = &pin.description {
+            println!("  Description: {}", desc);
+        }
+
+        println!("  Created: {}", pin.created);
+
+        if let Some(expires) = &pin.expires {
+            println!("  Expires: {}", expires);
+        }
+
+        for root in &pin.roots {
+            println!("    /nix/store/{}", root.drv_full);
+        }
+
+        println!();
+    }
 
     Ok(())
 }
