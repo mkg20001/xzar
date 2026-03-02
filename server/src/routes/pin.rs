@@ -1,12 +1,12 @@
 use chrono::{Duration, Utc};
 use diesel::prelude::*;
-use rocket::post;
+use rocket::{delete, get, post};
 use rocket::serde::json::Json;
 
 use crate::auth::AuthenticatedUser;
 use crate::db::Db;
 use crate::error::{AppError, Result};
-use crate::models::{DrvPin, FinalizePinRequest, NewPin, Pin};
+use crate::models::{DrvPin, FinalizePinRequest, NewPin, Pin, PinRoot, PinWithRoots, UpdatePin};
 use crate::schema::{drv_pins, drvs, pins};
 
 /// POST /finalizePin
@@ -103,4 +103,68 @@ pub fn finalize_pin(
         .execute(&mut conn)?;
 
     Ok(Json(pin.id))
+}
+
+/// GET /pins
+/// List all pins with their roots
+#[get("/pins")]
+pub fn list_pins(_auth: AuthenticatedUser, db: Db) -> Result<Json<Vec<PinWithRoots>>> {
+    let mut conn = db.0;
+
+    // Get all pins ordered by created desc
+    let all_pins: Vec<Pin> = pins::table
+        .order(pins::created.desc())
+        .load(&mut conn)?;
+
+    // For each pin, get its roots
+    let mut result = Vec::with_capacity(all_pins.len());
+
+    for pin in all_pins {
+        // Join drv_pins with drvs to get full drv info
+        let roots: Vec<(String, String)> = drv_pins::table
+            .inner_join(drvs::table)
+            .filter(drv_pins::pin_id.eq(pin.id))
+            .select((drvs::drv_id, drvs::drv_full))
+            .load(&mut conn)?;
+
+        let pin_roots: Vec<PinRoot> = roots
+            .into_iter()
+            .map(|(drv_id, drv_full)| PinRoot { drv_id, drv_full })
+            .collect();
+
+        result.push(PinWithRoots {
+            id: pin.id,
+            name: pin.name,
+            description: pin.description,
+            created: pin.created,
+            expires: pin.expires,
+            abandoned: pin.abandoned,
+            leave_after_abandon: pin.leave_after_abandon,
+            roots: pin_roots,
+        });
+    }
+
+    Ok(Json(result))
+}
+
+/// DELETE /pins/<id>
+/// Abandon a pin (mark as abandoned and set expires to now)
+#[delete("/pins/<id>")]
+pub fn abandon_pin(_auth: AuthenticatedUser, db: Db, id: i32) -> Result<Json<bool>> {
+    let mut conn = db.0;
+
+    let now = Utc::now().naive_utc();
+
+    let updated = diesel::update(pins::table.filter(pins::id.eq(id)))
+        .set(UpdatePin {
+            abandoned: Some(true),
+            expires: Some(Some(now)),
+        })
+        .execute(&mut conn)?;
+
+    if updated == 0 {
+        return Err(AppError::NotFound("Pin not found".to_string()));
+    }
+
+    Ok(Json(true))
 }

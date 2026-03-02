@@ -1,0 +1,329 @@
+use dioxus::prelude::*;
+use serde::{Deserialize, Serialize};
+
+fn main() {
+    dioxus::launch(App);
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct PinRoot {
+    drv_id: String,
+    drv_full: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct Pin {
+    id: i32,
+    name: String,
+    description: Option<String>,
+    created: String,
+    expires: Option<String>,
+    abandoned: bool,
+    leave_after_abandon: Option<i64>,
+    roots: Vec<PinRoot>,
+}
+
+async fn fetch_pins(server_url: &str, token: &str) -> Result<Vec<Pin>, String> {
+    let client = reqwest::Client::new();
+    let url = format!("{}/pins", server_url.trim_end_matches('/'));
+
+    let response = client
+        .get(&url)
+        .header("Authorization", format!("Bearer {}", token))
+        .send()
+        .await
+        .map_err(|e| format!("Request failed: {}", e))?;
+
+    if !response.status().is_success() {
+        return Err(format!("Server error: {}", response.status()));
+    }
+
+    response
+        .json::<Vec<Pin>>()
+        .await
+        .map_err(|e| format!("Failed to parse response: {}", e))
+}
+
+async fn abandon_pin(server_url: &str, token: &str, pin_id: i32) -> Result<(), String> {
+    let client = reqwest::Client::new();
+    let url = format!("{}/pins/{}", server_url.trim_end_matches('/'), pin_id);
+
+    let response = client
+        .delete(&url)
+        .header("Authorization", format!("Bearer {}", token))
+        .send()
+        .await
+        .map_err(|e| format!("Request failed: {}", e))?;
+
+    if !response.status().is_success() {
+        return Err(format!("Server error: {}", response.status()));
+    }
+
+    Ok(())
+}
+
+#[component]
+fn App() -> Element {
+    let mut server_url = use_signal(|| String::from("http://localhost:17788"));
+    let mut token = use_signal(|| String::new());
+    let mut pins = use_signal(|| Vec::<Pin>::new());
+    let mut error = use_signal(|| Option::<String>::None);
+    let mut loading = use_signal(|| false);
+    let mut authenticated = use_signal(|| false);
+
+    let load_pins = move |_| async move {
+        loading.set(true);
+        error.set(None);
+
+        match fetch_pins(&server_url.read(), &token.read()).await {
+            Ok(fetched_pins) => {
+                pins.set(fetched_pins);
+                authenticated.set(true);
+            }
+            Err(e) => {
+                error.set(Some(e));
+                authenticated.set(false);
+            }
+        }
+
+        loading.set(false);
+    };
+
+    let refresh_pins = move |_| async move {
+        loading.set(true);
+        error.set(None);
+
+        match fetch_pins(&server_url.read(), &token.read()).await {
+            Ok(fetched_pins) => {
+                pins.set(fetched_pins);
+            }
+            Err(e) => {
+                error.set(Some(e));
+            }
+        }
+
+        loading.set(false);
+    };
+
+    rsx! {
+        div { class: "min-h-screen bg-gray-100 py-8",
+            div { class: "max-w-6xl mx-auto px-4",
+                h1 { class: "text-3xl font-bold text-gray-800 mb-8", "xzar Binary Cache" }
+
+                // Login form
+                if !*authenticated.read() {
+                    div { class: "bg-white rounded-lg shadow-md p-6 mb-6",
+                        h2 { class: "text-xl font-semibold text-gray-700 mb-4", "Connect to Server" }
+
+                        div { class: "space-y-4",
+                            div {
+                                label { class: "block text-sm font-medium text-gray-700 mb-1",
+                                    "Server URL"
+                                }
+                                input {
+                                    class: "w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500",
+                                    r#type: "text",
+                                    placeholder: "http://localhost:17788",
+                                    value: "{server_url}",
+                                    oninput: move |e| server_url.set(e.value())
+                                }
+                            }
+
+                            div {
+                                label { class: "block text-sm font-medium text-gray-700 mb-1",
+                                    "Token"
+                                }
+                                input {
+                                    class: "w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500",
+                                    r#type: "password",
+                                    placeholder: "Enter your upload token",
+                                    value: "{token}",
+                                    oninput: move |e| token.set(e.value())
+                                }
+                            }
+
+                            button {
+                                class: "w-full bg-blue-600 text-white py-2 px-4 rounded-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-50",
+                                disabled: *loading.read(),
+                                onclick: load_pins,
+                                if *loading.read() { "Connecting..." } else { "Connect" }
+                            }
+                        }
+
+                        if let Some(err) = error.read().as_ref() {
+                            div { class: "mt-4 p-3 bg-red-100 text-red-700 rounded-md",
+                                "{err}"
+                            }
+                        }
+                    }
+                } else {
+                    // Authenticated view
+                    div { class: "bg-white rounded-lg shadow-md p-6 mb-6",
+                        div { class: "flex justify-between items-center mb-4",
+                            h2 { class: "text-xl font-semibold text-gray-700", "Pins" }
+                            div { class: "flex gap-2",
+                                button {
+                                    class: "bg-gray-200 text-gray-700 py-2 px-4 rounded-md hover:bg-gray-300 focus:outline-none focus:ring-2 focus:ring-gray-400",
+                                    onclick: refresh_pins,
+                                    "Refresh"
+                                }
+                                button {
+                                    class: "bg-red-100 text-red-700 py-2 px-4 rounded-md hover:bg-red-200 focus:outline-none focus:ring-2 focus:ring-red-400",
+                                    onclick: move |_| {
+                                        authenticated.set(false);
+                                        pins.set(Vec::new());
+                                    },
+                                    "Logout"
+                                }
+                            }
+                        }
+
+                        if let Some(err) = error.read().as_ref() {
+                            div { class: "mb-4 p-3 bg-red-100 text-red-700 rounded-md",
+                                "{err}"
+                            }
+                        }
+
+                        if pins.read().is_empty() {
+                            div { class: "text-gray-500 text-center py-8",
+                                "No pins found"
+                            }
+                        } else {
+                            div { class: "space-y-4",
+                                for pin in pins.read().iter() {
+                                    PinCard {
+                                        key: "{pin.id}",
+                                        pin: pin.clone(),
+                                        server_url: server_url.read().clone(),
+                                        token: token.read().clone(),
+                                        on_abandoned: move |_| async move {
+                                            // Refresh pins after abandoning
+                                            if let Ok(fetched_pins) = fetch_pins(&server_url.read(), &token.read()).await {
+                                                pins.set(fetched_pins);
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[component]
+fn PinCard(
+    pin: Pin,
+    server_url: String,
+    token: String,
+    on_abandoned: EventHandler<()>,
+) -> Element {
+    let mut abandoning = use_signal(|| false);
+    let mut abandon_error = use_signal(|| Option::<String>::None);
+
+    let pin_id = pin.id;
+    let is_abandoned = pin.abandoned;
+    let server_url_clone = server_url.clone();
+    let token_clone = token.clone();
+
+    let handle_abandon = move |_| {
+        let server_url = server_url_clone.clone();
+        let token = token_clone.clone();
+        async move {
+            abandoning.set(true);
+            abandon_error.set(None);
+
+            match abandon_pin(&server_url, &token, pin_id).await {
+                Ok(()) => {
+                    on_abandoned.call(());
+                }
+                Err(e) => {
+                    abandon_error.set(Some(e));
+                }
+            }
+
+            abandoning.set(false);
+        }
+    };
+
+    let status_class = if pin.abandoned {
+        "bg-red-100 text-red-800"
+    } else if pin.expires.is_some() {
+        "bg-yellow-100 text-yellow-800"
+    } else {
+        "bg-green-100 text-green-800"
+    };
+
+    let status_text = if pin.abandoned {
+        "Abandoned"
+    } else if pin.expires.is_some() {
+        "Expiring"
+    } else {
+        "Active"
+    };
+
+    rsx! {
+        div { class: "border border-gray-200 rounded-lg p-4 hover:shadow-md transition-shadow",
+            div { class: "flex justify-between items-start mb-3",
+                div {
+                    h3 { class: "text-lg font-medium text-gray-800", "{pin.name}" }
+                    if let Some(desc) = &pin.description {
+                        p { class: "text-sm text-gray-500 mt-1", "{desc}" }
+                    }
+                }
+                div { class: "flex items-center gap-2",
+                    span { class: "px-2 py-1 text-xs font-medium rounded-full {status_class}",
+                        "{status_text}"
+                    }
+                    if !is_abandoned {
+                        button {
+                            class: "px-3 py-1 text-sm bg-red-500 text-white rounded hover:bg-red-600 disabled:opacity-50",
+                            disabled: *abandoning.read(),
+                            onclick: handle_abandon,
+                            if *abandoning.read() { "..." } else { "Abandon" }
+                        }
+                    }
+                }
+            }
+
+            if let Some(err) = abandon_error.read().as_ref() {
+                div { class: "mb-3 p-2 bg-red-100 text-red-700 text-sm rounded",
+                    "{err}"
+                }
+            }
+
+            div { class: "text-sm text-gray-600 space-y-1",
+                div { "ID: {pin.id}" }
+                div { "Created: {pin.created}" }
+                if let Some(expires) = &pin.expires {
+                    div { "Expires: {expires}" }
+                }
+                if let Some(leave) = pin.leave_after_abandon {
+                    div { "Leave after abandon: {leave}ms" }
+                }
+            }
+
+            if !pin.roots.is_empty() {
+                div { class: "mt-3",
+                    h4 { class: "text-sm font-medium text-gray-700 mb-2",
+                        "Roots ({pin.roots.len()})"
+                    }
+                    div { class: "space-y-1",
+                        for root in pin.roots.iter() {
+                            div {
+                                key: "{root.drv_id}",
+                                class: "text-xs font-mono bg-gray-100 p-2 rounded truncate",
+                                title: "/nix/store/{root.drv_full}",
+                                "/nix/store/{root.drv_full}"
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}

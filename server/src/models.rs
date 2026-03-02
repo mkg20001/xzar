@@ -161,3 +161,25 @@ pub struct FinalizePinRequest {
     #[serde(rename = "leaveAfterAbandon", default)]
     pub leave_after_abandon: Option<i64>,
 }
+
+// ============ Pins List Response ============
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PinWithRoots {
+    pub id: i32,
+    pub name: String,
+    pub description: Option<String>,
+    pub created: NaiveDateTime,
+    pub expires: Option<NaiveDateTime>,
+    pub abandoned: bool,
+    pub leave_after_abandon: Option<i64>,
+    pub roots: Vec<PinRoot>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PinRoot {
+    pub drv_id: String,
+    pub drv_full: String,
+}

@@ -1,0 +1,13 @@
+[application]
+name = "xzar-ui"
+default_platform = "web"
+
+[web.app]
+title = "xzar - Binary Cache"
+
+[web.watcher]
+reload_html = true
+watch_path = ["src", "assets"]
+
+[web.resource]
+style = ["/assets/tailwind.css"]

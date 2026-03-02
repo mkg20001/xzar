@@ -6,7 +6,9 @@ use std::net::IpAddr;
 use diesel::r2d2::{ConnectionManager, Pool};
 use diesel::PgConnection;
 use rocket::fairing::AdHoc;
+use rocket::http::Method;
 use rocket::tokio;
+use rocket_cors::{AllowedOrigins, CorsOptions};
 use tracing_subscriber::EnvFilter;
 
 use xzar_server::auth::TokenStore;
@@ -85,8 +87,22 @@ async fn rocket() -> _ {
         .merge(("address", address))
         .merge(("port", config.rocket.port));
 
+    // Configure CORS
+    let cors = CorsOptions::default()
+        .allowed_origins(AllowedOrigins::all())
+        .allowed_methods(
+            vec![Method::Get, Method::Post, Method::Delete, Method::Options]
+                .into_iter()
+                .map(From::from)
+                .collect(),
+        )
+        .allow_credentials(true)
+        .to_cors()
+        .expect("Failed to create CORS configuration");
+
     // Build Rocket instance
     rocket::custom(figment)
+        .attach(cors)
         .manage(Database(pool))
         .manage(storage)
         .manage(token_store)
@@ -111,6 +127,8 @@ async fn rocket() -> _ {
                 routes::lock_clear,
                 routes::upload_nar,
                 routes::finalize_pin,
+                routes::list_pins,
+                routes::abandon_pin,
             ],
         )
 }
