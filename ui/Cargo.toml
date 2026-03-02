@@ -6,6 +6,7 @@ description = "Web UI for xzar binary cache"
 license = "MIT"
 
 [dependencies]
+xzar-common = { path = "../common" }
 dioxus = { version = "0.7.3", features = ["web"] }
 wasm-bindgen = "=0.2.108"
 serde = { version = "1", features = ["derive"] }

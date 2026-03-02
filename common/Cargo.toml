@@ -1,0 +1,9 @@
+[package]
+name = "xzar-common"
+version = "0.1.0"
+edition = "2021"
+description = "Common types and utilities for xzar"
+license = "MIT"
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }

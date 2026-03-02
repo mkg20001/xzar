@@ -1,56 +1,12 @@
 use std::collections::BTreeMap;
 
 use dioxus::prelude::*;
-use serde::{Deserialize, Serialize};
+use xzar_common::{PinResponse as Pin, format_duration};
 
 const TAILWIND_CSS: &str = include_str!("../assets/tailwind.css");
 
 fn main() {
     dioxus::launch(App);
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct PinRoot {
-    drv_id: String,
-    drv_full: String,
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct Pin {
-    id: i32,
-    name: String,
-    description: Option<String>,
-    created: String,
-    expires: Option<String>,
-    abandoned: bool,
-    leave_after_abandon: Option<i64>,
-    roots: Vec<PinRoot>,
-}
-
-/// Format milliseconds as human-readable duration
-fn format_duration(ms: i64) -> String {
-    const DAY_MS: i64 = 24 * 60 * 60 * 1000;
-    const WEEK_MS: i64 = 7 * DAY_MS;
-    const MONTH_MS: i64 = 30 * DAY_MS;
-    const YEAR_MS: i64 = 365 * DAY_MS;
-
-    if ms >= YEAR_MS {
-        let years = ms / YEAR_MS;
-        format!("{}y", years)
-    } else if ms >= MONTH_MS {
-        let months = ms / MONTH_MS;
-        format!("{}m", months)
-    } else if ms >= WEEK_MS {
-        let weeks = ms / WEEK_MS;
-        format!("{}w", weeks)
-    } else if ms >= DAY_MS {
-        let days = ms / DAY_MS;
-        format!("{}d", days)
-    } else {
-        format!("{}ms", ms)
-    }
 }
 
 /// Group pins by name, with non-abandoned pins first in each group

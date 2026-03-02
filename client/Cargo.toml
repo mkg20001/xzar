@@ -10,6 +10,9 @@ name = "xzar"
 path = "src/main.rs"
 
 [dependencies]
+# Common types
+xzar-common = { path = "../common" }
+
 # CLI
 clap = { version = "4", features = ["derive"] }
 

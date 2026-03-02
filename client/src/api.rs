@@ -4,66 +4,16 @@ use std::time::Duration;
 use anyhow::{anyhow, Context, Result};
 use reqwest::multipart::{Form, Part};
 use reqwest::Client;
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use tokio::sync::Mutex;
+use xzar_common::{CheckRequest, CheckResponse, FinalizePinRequest, LockRequest, LockResponse, PinResponse};
+
+pub use xzar_common::{PinRoot, format_duration};
 
 #[derive(Debug, Deserialize)]
 struct ErrorResponse {
     error: Option<String>,
     message: Option<String>,
-}
-
-#[derive(Debug, Serialize)]
-struct CheckRequest {
-    paths: Vec<String>,
-}
-
-#[derive(Debug, Deserialize)]
-struct CheckResponse {
-    need: Vec<String>,
-}
-
-#[derive(Debug, Deserialize)]
-struct LockResponse {
-    lock: i32,
-    deadline: String,
-}
-
-#[derive(Debug, Serialize)]
-struct LockRequest {
-    lock: i32,
-}
-
-#[derive(Debug, Serialize)]
-struct FinalizePinRequest {
-    roots: Vec<String>,
-    name: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    desc: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    expires: Option<u64>,
-    #[serde(rename = "leaveAfterAbandon", skip_serializing_if = "Option::is_none")]
-    leave_after_abandon: Option<u64>,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct PinRoot {
-    pub drv_id: String,
-    pub drv_full: String,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct PinResponse {
-    pub id: i32,
-    pub name: String,
-    pub description: Option<String>,
-    pub created: String,
-    pub expires: Option<String>,
-    pub abandoned: bool,
-    pub leave_after_abandon: Option<i64>,
-    pub roots: Vec<PinRoot>,
 }
 
 #[derive(Clone)]

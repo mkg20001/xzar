@@ -1,5 +1,5 @@
 [workspace]
-members = ["server", "client", "interop", "ui"]
+members = ["common", "server", "client", "interop", "ui"]
 resolver = "2"
 
 [profile]
