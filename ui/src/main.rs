@@ -247,30 +247,98 @@ fn PinGroup(
     token: String,
     on_refresh: EventHandler<()>,
 ) -> Element {
-    let has_abandoned = pins.iter().any(|p| p.abandoned);
-    let abandoned_count = pins.iter().filter(|p| p.abandoned).count();
+    let mut expanded = use_signal(|| true);
+    let mut show_abandoned = use_signal(|| false);
+
+    let active_pins: Vec<_> = pins.iter().filter(|p| !p.abandoned).cloned().collect();
+    let abandoned_pins: Vec<_> = pins.iter().filter(|p| p.abandoned).cloned().collect();
+    let abandoned_count = abandoned_pins.len();
 
     rsx! {
         div { class: "border border-gray-200 rounded-lg overflow-hidden",
-            div { class: "bg-gray-50 px-4 py-3 border-b border-gray-200",
+            // Header - clickable to collapse/expand
+            button {
+                class: "w-full bg-gray-50 px-4 py-3 border-b border-gray-200 text-left hover:bg-gray-100 transition-colors",
+                onclick: move |_| {
+                    let current = *expanded.read();
+                    expanded.set(!current);
+                },
                 div { class: "flex justify-between items-center",
-                    h3 { class: "text-lg font-semibold text-gray-800", "{name}" }
-                    if has_abandoned {
+                    div { class: "flex items-center gap-2",
+                        span { class: "text-gray-400 text-sm",
+                            if *expanded.read() { "▼" } else { "▶" }
+                        }
+                        h3 { class: "text-lg font-semibold text-gray-800", "{name}" }
+                    }
+                    div { class: "flex items-center gap-2",
                         span { class: "text-xs text-gray-500",
-                            "{abandoned_count} abandoned"
+                            "{active_pins.len()} active"
+                        }
+                        if abandoned_count > 0 {
+                            span { class: "text-xs text-gray-400",
+                                "+ {abandoned_count} abandoned"
+                            }
                         }
                     }
                 }
             }
-            div { class: "divide-y divide-gray-100",
-                for pin in pins.iter() {
-                    PinCard {
-                        key: "{pin.id}",
-                        pin: pin.clone(),
-                        server_url: server_url.clone(),
-                        token: token.clone(),
-                        on_abandoned: move |_| {
-                            on_refresh.call(());
+
+            // Content - collapsible
+            if *expanded.read() {
+                div { class: "divide-y divide-gray-100",
+                    // Active pins
+                    for pin in active_pins.iter() {
+                        div { class: "pl-4",
+                            PinCard {
+                                key: "{pin.id}",
+                                pin: pin.clone(),
+                                server_url: server_url.clone(),
+                                token: token.clone(),
+                                on_abandoned: move |_| {
+                                    on_refresh.call(());
+                                }
+                            }
+                        }
+                    }
+
+                    // Show abandoned toggle
+                    if abandoned_count > 0 {
+                        if *show_abandoned.read() {
+                            // Abandoned pins
+                            for pin in abandoned_pins.iter() {
+                                div { class: "pl-4",
+                                    PinCard {
+                                        key: "{pin.id}",
+                                        pin: pin.clone(),
+                                        server_url: server_url.clone(),
+                                        token: token.clone(),
+                                        on_abandoned: move |_| {
+                                            on_refresh.call(());
+                                        }
+                                    }
+                                }
+                            }
+                            button {
+                                class: "w-full px-4 py-2 text-sm text-gray-500 hover:text-gray-700 hover:bg-gray-50 text-left pl-8",
+                                onclick: move |e| {
+                                    e.stop_propagation();
+                                    show_abandoned.set(false);
+                                },
+                                "Hide abandoned pins"
+                            }
+                        } else {
+                            button {
+                                class: "w-full px-4 py-2 text-sm text-gray-500 hover:text-gray-700 hover:bg-gray-50 text-left pl-8",
+                                onclick: move |e| {
+                                    e.stop_propagation();
+                                    show_abandoned.set(true);
+                                },
+                                if abandoned_count == 1 {
+                                    "View 1 abandoned pin..."
+                                } else {
+                                    "View {abandoned_count} abandoned pins..."
+                                }
+                            }
                         }
                     }
                 }
