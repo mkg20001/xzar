@@ -29,6 +29,30 @@ struct Pin {
     roots: Vec<PinRoot>,
 }
 
+/// Format milliseconds as human-readable duration
+fn format_duration(ms: i64) -> String {
+    const DAY_MS: i64 = 24 * 60 * 60 * 1000;
+    const WEEK_MS: i64 = 7 * DAY_MS;
+    const MONTH_MS: i64 = 30 * DAY_MS;
+    const YEAR_MS: i64 = 365 * DAY_MS;
+
+    if ms >= YEAR_MS {
+        let years = ms / YEAR_MS;
+        format!("{}y", years)
+    } else if ms >= MONTH_MS {
+        let months = ms / MONTH_MS;
+        format!("{}m", months)
+    } else if ms >= WEEK_MS {
+        let weeks = ms / WEEK_MS;
+        format!("{}w", weeks)
+    } else if ms >= DAY_MS {
+        let days = ms / DAY_MS;
+        format!("{}d", days)
+    } else {
+        format!("{}ms", ms)
+    }
+}
+
 /// Group pins by name, with non-abandoned pins first in each group
 fn group_pins(pins: &[Pin]) -> Vec<(String, Vec<Pin>)> {
     let mut groups: BTreeMap<String, Vec<Pin>> = BTreeMap::new();
@@ -436,7 +460,7 @@ fn PinCard(
                     div { "Expires: {expires}" }
                 }
                 if let Some(leave) = pin.leave_after_abandon {
-                    div { "Leave after abandon: {leave}ms" }
+                    div { "Leave after abandon: {format_duration(leave)}" }
                 }
             }
 

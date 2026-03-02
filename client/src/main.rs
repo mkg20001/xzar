@@ -63,6 +63,30 @@ enum Command {
     List,
 }
 
+/// Format milliseconds as human-readable duration
+fn format_duration(ms: i64) -> String {
+    const DAY_MS: i64 = 24 * 60 * 60 * 1000;
+    const WEEK_MS: i64 = 7 * DAY_MS;
+    const MONTH_MS: i64 = 30 * DAY_MS;
+    const YEAR_MS: i64 = 365 * DAY_MS;
+
+    if ms >= YEAR_MS {
+        let years = ms / YEAR_MS;
+        format!("{}y", years)
+    } else if ms >= MONTH_MS {
+        let months = ms / MONTH_MS;
+        format!("{}m", months)
+    } else if ms >= WEEK_MS {
+        let weeks = ms / WEEK_MS;
+        format!("{}w", weeks)
+    } else if ms >= DAY_MS {
+        let days = ms / DAY_MS;
+        format!("{}d", days)
+    } else {
+        format!("{}ms", ms)
+    }
+}
+
 fn parse_duration(s: &str) -> Option<u64> {
     let s = s.trim();
     if s.is_empty() {
@@ -250,6 +274,10 @@ async fn cmd_list(api: ApiClient) -> Result<()> {
 
         if let Some(expires) = &pin.expires {
             println!("  Expires: {}", expires);
+        }
+
+        if let Some(leave) = pin.leave_after_abandon {
+            println!("  Leave after abandon: {}", format_duration(leave));
         }
 
         for root in &pin.roots {
