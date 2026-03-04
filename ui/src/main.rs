@@ -277,7 +277,6 @@ fn TreeNodeView(
     token: String,
     on_refresh: EventHandler<()>,
 ) -> Element {
-    let mut expanded = use_signal(|| true);
     let mut show_abandoned = use_signal(|| false);
 
     let has_pins = !node.pins.is_empty();
@@ -301,39 +300,15 @@ fn TreeNodeView(
         div { class: "{indent_class}",
             // Render children (directories)
             for (name, child) in sorted_children.iter() {
-                div { class: "border-l-2 border-gray-200 my-1",
-                    // Directory header
-                    button {
-                        class: "w-full flex items-center gap-2 px-3 py-2 text-left hover:bg-gray-50 rounded-r transition-colors",
-                        onclick: move |_| {
-                            let current = *expanded.read();
-                            expanded.set(!current);
-                        },
-                        span { class: "text-gray-400 text-xs w-4",
-                            if *expanded.read() { "▼" } else { "▶" }
-                        }
-                        span { class: "font-medium text-gray-700", "{name}/" }
-                        span { class: "text-xs text-gray-400 ml-auto",
-                            if child.active_pins() > 0 {
-                                "{child.active_pins()} active"
-                            }
-                            if child.abandoned_pins() > 0 {
-                                " +{child.abandoned_pins()} abandoned"
-                            }
-                        }
-                    }
-
-                    // Child content
-                    if *expanded.read() {
-                        TreeNodeView {
-                            node: child.clone(),
-                            path: if path.is_empty() { name.clone() } else { format!("{}/{}", path, name) },
-                            depth: depth + 1,
-                            server_url: server_url.clone(),
-                            token: token.clone(),
-                            on_refresh: on_refresh.clone()
-                        }
-                    }
+                TreeDirNode {
+                    key: "{name}",
+                    name: name.clone(),
+                    child: child.clone(),
+                    path: path.clone(),
+                    depth: depth,
+                    server_url: server_url.clone(),
+                    token: token.clone(),
+                    on_refresh: on_refresh.clone()
                 }
             }
 
@@ -380,6 +355,56 @@ fn TreeNodeView(
                             "Show {abandoned_pins.len()} abandoned..."
                         }
                     }
+                }
+            }
+        }
+    }
+}
+
+#[component]
+fn TreeDirNode(
+    name: String,
+    child: PinTreeNode,
+    path: String,
+    depth: usize,
+    server_url: String,
+    token: String,
+    on_refresh: EventHandler<()>,
+) -> Element {
+    let mut expanded = use_signal(|| true);
+
+    rsx! {
+        div { class: "border-l-2 border-gray-200 my-1",
+            // Directory header
+            button {
+                class: "w-full flex items-center gap-2 px-3 py-2 text-left hover:bg-gray-50 rounded-r transition-colors",
+                onclick: move |_| {
+                    let current = *expanded.read();
+                    expanded.set(!current);
+                },
+                span { class: "text-gray-400 text-xs w-4",
+                    if *expanded.read() { "▼" } else { "▶" }
+                }
+                span { class: "font-medium text-gray-700", "{name}/" }
+                span { class: "text-xs text-gray-400 ml-auto",
+                    if child.active_pins() > 0 {
+                        "{child.active_pins()} active"
+                    }
+                    if child.abandoned_pins() > 0 {
+                        " +{child.abandoned_pins()} abandoned"
+                    }
+                }
+            }
+
+            // Child content
+            if *expanded.read() {
+                TreeNodeView {
+                    node: child.clone(),
+                    path: if path.is_empty() { name.clone() } else { format!("{}/{}", path, name) },
+                    depth: depth + 1,
+                    server_url: server_url.clone(),
+                    token: token.clone(),
+                    on_refresh: on_refresh.clone()
                 }
             }
         }
