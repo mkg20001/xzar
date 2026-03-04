@@ -71,6 +71,7 @@
             # Dioxus CLI and WASM tools
             dioxus-cli
             wasm-bindgen-cli
+            binaryen
           ];
 
           RUST_SRC_PATH = "${rustToolchain}/lib/rustlib/src/rust/library";

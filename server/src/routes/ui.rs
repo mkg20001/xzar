@@ -63,7 +63,7 @@ pub fn is_ui_embedded() -> bool {
 
 /// GET /ui
 /// Serve the main UI page (index.html)
-#[get("/ui")]
+#[get("/")]
 pub fn ui_index() -> Result<RawHtml<Vec<u8>>, Status> {
     get_index_html()
         .map(|data| RawHtml(data.into_owned()))
@@ -72,11 +72,11 @@ pub fn ui_index() -> Result<RawHtml<Vec<u8>>, Status> {
 
 /// GET /ui/<path..>
 /// Serve static UI assets (js, wasm, css, etc.)
-#[get("/ui/<path..>")]
+#[get("/assets/<path..>")]
 pub fn ui_assets(path: std::path::PathBuf) -> Result<(ContentType, Vec<u8>), Status> {
     let path_str = path.to_string_lossy();
 
-    get_embedded_file(&path_str)
+    get_embedded_file(&format!("/assets/{}", path_str).to_string())
         .map(|data| (content_type_for_path(&path_str), data.into_owned()))
         .ok_or(Status::NotFound)
 }
