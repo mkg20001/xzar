@@ -439,6 +439,20 @@ async fn run_server(
                 routes::finalize_pin,
                 routes::list_pins,
                 routes::abandon_pin,
+                // Auth info
+                routes::get_self,
+                // Admin routes
+                routes::list_users,
+                routes::create_user,
+                routes::update_user,
+                routes::delete_user,
+                routes::list_tokens,
+                routes::create_token,
+                routes::update_token,
+                routes::delete_token,
+                // UI routes
+                routes::ui_index,
+                routes::ui_assets,
             ],
         );
 

@@ -1,9 +1,54 @@
 use std::collections::BTreeMap;
 
+use chrono::NaiveDateTime;
 use dioxus::prelude::*;
+use serde::{Deserialize, Serialize};
 use xzar_common::{PinResponse as Pin, format_duration};
 
 const TAILWIND_CSS: &str = include_str!("../assets/tailwind.css");
+
+// ============ API Types ============
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct SelfResponse {
+    is_admin: bool,
+    credential_type: String,
+    user: Option<UserInfo>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct UserInfo {
+    id: i32,
+    name: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct AdminUserResponse {
+    id: i32,
+    name: String,
+    is_admin: bool,
+    created: NaiveDateTime,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct AdminTokenResponse {
+    id: i32,
+    user_id: Option<i32>,
+    user_name: Option<String>,
+    is_system: bool,
+    description: Option<String>,
+    created: NaiveDateTime,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct CreateTokenResponse {
+    id: i32,
+    token: String,
+}
 
 fn main() {
     dioxus::launch(App);
@@ -118,6 +163,199 @@ async fn abandon_pin(server_url: &str, token: &str, pin_id: i32) -> Result<(), S
     Ok(())
 }
 
+// ============ Self/Auth Info API ============
+
+async fn fetch_self(server_url: &str, token: &str) -> Result<SelfResponse, String> {
+    let client = reqwest::Client::new();
+    let url = format!("{}/self", server_url.trim_end_matches('/'));
+
+    let response = client
+        .get(&url)
+        .header("Authorization", format!("Bearer {}", token))
+        .send()
+        .await
+        .map_err(|e| format!("Request failed: {}", e))?;
+
+    if !response.status().is_success() {
+        return Err(format!("Server error: {}", response.status()));
+    }
+
+    response
+        .json::<SelfResponse>()
+        .await
+        .map_err(|e| format!("Failed to parse response: {}", e))
+}
+
+// ============ Admin Users API ============
+
+async fn fetch_users(server_url: &str, token: &str) -> Result<Vec<AdminUserResponse>, String> {
+    let client = reqwest::Client::new();
+    let url = format!("{}/admin/users", server_url.trim_end_matches('/'));
+
+    let response = client
+        .get(&url)
+        .header("Authorization", format!("Bearer {}", token))
+        .send()
+        .await
+        .map_err(|e| format!("Request failed: {}", e))?;
+
+    if !response.status().is_success() {
+        return Err(format!("Server error: {}", response.status()));
+    }
+
+    response
+        .json()
+        .await
+        .map_err(|e| format!("Failed to parse response: {}", e))
+}
+
+async fn create_user(server_url: &str, token: &str, name: &str, is_admin: bool) -> Result<AdminUserResponse, String> {
+    let client = reqwest::Client::new();
+    let url = format!("{}/admin/users", server_url.trim_end_matches('/'));
+
+    let response = client
+        .post(&url)
+        .header("Authorization", format!("Bearer {}", token))
+        .json(&serde_json::json!({ "name": name, "isAdmin": is_admin }))
+        .send()
+        .await
+        .map_err(|e| format!("Request failed: {}", e))?;
+
+    if !response.status().is_success() {
+        return Err(format!("Server error: {}", response.status()));
+    }
+
+    response
+        .json()
+        .await
+        .map_err(|e| format!("Failed to parse response: {}", e))
+}
+
+async fn update_user(server_url: &str, token: &str, user_id: i32, is_admin: bool) -> Result<(), String> {
+    let client = reqwest::Client::new();
+    let url = format!("{}/admin/users/{}", server_url.trim_end_matches('/'), user_id);
+
+    let response = client
+        .put(&url)
+        .header("Authorization", format!("Bearer {}", token))
+        .json(&serde_json::json!({ "isAdmin": is_admin }))
+        .send()
+        .await
+        .map_err(|e| format!("Request failed: {}", e))?;
+
+    if !response.status().is_success() {
+        return Err(format!("Server error: {}", response.status()));
+    }
+
+    Ok(())
+}
+
+async fn delete_user(server_url: &str, token: &str, user_id: i32) -> Result<(), String> {
+    let client = reqwest::Client::new();
+    let url = format!("{}/admin/users/{}", server_url.trim_end_matches('/'), user_id);
+
+    let response = client
+        .delete(&url)
+        .header("Authorization", format!("Bearer {}", token))
+        .send()
+        .await
+        .map_err(|e| format!("Request failed: {}", e))?;
+
+    if !response.status().is_success() {
+        return Err(format!("Server error: {}", response.status()));
+    }
+
+    Ok(())
+}
+
+// ============ Admin Tokens API ============
+
+async fn fetch_tokens(server_url: &str, token: &str) -> Result<Vec<AdminTokenResponse>, String> {
+    let client = reqwest::Client::new();
+    let url = format!("{}/admin/tokens", server_url.trim_end_matches('/'));
+
+    let response = client
+        .get(&url)
+        .header("Authorization", format!("Bearer {}", token))
+        .send()
+        .await
+        .map_err(|e| format!("Request failed: {}", e))?;
+
+    if !response.status().is_success() {
+        return Err(format!("Server error: {}", response.status()));
+    }
+
+    response
+        .json()
+        .await
+        .map_err(|e| format!("Failed to parse response: {}", e))
+}
+
+async fn create_token(server_url: &str, token: &str, user_id: Option<i32>, description: Option<&str>) -> Result<CreateTokenResponse, String> {
+    let client = reqwest::Client::new();
+    let url = format!("{}/admin/tokens", server_url.trim_end_matches('/'));
+
+    let response = client
+        .post(&url)
+        .header("Authorization", format!("Bearer {}", token))
+        .json(&serde_json::json!({ "userId": user_id, "description": description }))
+        .send()
+        .await
+        .map_err(|e| format!("Request failed: {}", e))?;
+
+    if !response.status().is_success() {
+        return Err(format!("Server error: {}", response.status()));
+    }
+
+    response
+        .json()
+        .await
+        .map_err(|e| format!("Failed to parse response: {}", e))
+}
+
+async fn update_token(server_url: &str, token: &str, token_id: i32, description: Option<&str>) -> Result<(), String> {
+    let client = reqwest::Client::new();
+    let url = format!("{}/admin/tokens/{}", server_url.trim_end_matches('/'), token_id);
+
+    let response = client
+        .put(&url)
+        .header("Authorization", format!("Bearer {}", token))
+        .json(&serde_json::json!({ "description": description }))
+        .send()
+        .await
+        .map_err(|e| format!("Request failed: {}", e))?;
+
+    if !response.status().is_success() {
+        return Err(format!("Server error: {}", response.status()));
+    }
+
+    Ok(())
+}
+
+async fn delete_token(server_url: &str, token: &str, token_id: i32) -> Result<(), String> {
+    let client = reqwest::Client::new();
+    let url = format!("{}/admin/tokens/{}", server_url.trim_end_matches('/'), token_id);
+
+    let response = client
+        .delete(&url)
+        .header("Authorization", format!("Bearer {}", token))
+        .send()
+        .await
+        .map_err(|e| format!("Request failed: {}", e))?;
+
+    if !response.status().is_success() {
+        return Err(format!("Server error: {}", response.status()));
+    }
+
+    Ok(())
+}
+
+#[derive(Clone, Copy, PartialEq)]
+enum ActiveTab {
+    Pins,
+    Admin,
+}
+
 #[component]
 fn App() -> Element {
     let mut server_url = use_signal(|| String::from("http://localhost:17788"));
@@ -126,11 +364,27 @@ fn App() -> Element {
     let mut error = use_signal(|| Option::<String>::None);
     let mut loading = use_signal(|| false);
     let mut authenticated = use_signal(|| false);
+    let mut self_info = use_signal(|| Option::<SelfResponse>::None);
+    let mut active_tab = use_signal(|| ActiveTab::Pins);
 
     let load_pins = move |_| async move {
         loading.set(true);
         error.set(None);
 
+        // First fetch self info
+        match fetch_self(&server_url.read(), &token.read()).await {
+            Ok(info) => {
+                self_info.set(Some(info));
+            }
+            Err(e) => {
+                error.set(Some(e));
+                authenticated.set(false);
+                loading.set(false);
+                return;
+            }
+        }
+
+        // Then fetch pins
         match fetch_pins(&server_url.read(), &token.read()).await {
             Ok(fetched_pins) => {
                 pins.set(fetched_pins);
@@ -160,6 +414,8 @@ fn App() -> Element {
 
         loading.set(false);
     };
+
+    let is_admin = self_info.read().as_ref().map(|s| s.is_admin).unwrap_or(false);
 
     rsx! {
         document::Style { {TAILWIND_CSS} }
@@ -235,24 +491,50 @@ fn App() -> Element {
                         // Header bar
                         div { class: "bg-gradient-to-r from-blue-600 to-blue-700 px-6 py-4",
                             div { class: "flex justify-between items-center",
-                                div { class: "flex items-center gap-3",
-                                    span { class: "text-2xl", "📌" }
-                                    h2 { class: "text-xl font-semibold text-white", "Pins" }
-                                    span { class: "text-blue-200 text-sm",
-                                        "({pins.read().len()} total)"
+                                // Tabs
+                                div { class: "flex items-center gap-1",
+                                    button {
+                                        class: if *active_tab.read() == ActiveTab::Pins {
+                                            "flex items-center gap-2 bg-white/30 text-white py-2 px-4 rounded-lg font-medium"
+                                        } else {
+                                            "flex items-center gap-2 bg-white/10 text-white/80 py-2 px-4 rounded-lg hover:bg-white/20 transition-colors"
+                                        },
+                                        onclick: move |_| active_tab.set(ActiveTab::Pins),
+                                        span { "📌" }
+                                        "Pins"
+                                        span { class: "text-xs opacity-75 ml-1",
+                                            "({pins.read().len()})"
+                                        }
+                                    }
+                                    if is_admin {
+                                        button {
+                                            class: if *active_tab.read() == ActiveTab::Admin {
+                                                "flex items-center gap-2 bg-white/30 text-white py-2 px-4 rounded-lg font-medium"
+                                            } else {
+                                                "flex items-center gap-2 bg-white/10 text-white/80 py-2 px-4 rounded-lg hover:bg-white/20 transition-colors"
+                                            },
+                                            onclick: move |_| active_tab.set(ActiveTab::Admin),
+                                            span { "⚙️" }
+                                            "Admin"
+                                        }
                                     }
                                 }
+                                // Actions
                                 div { class: "flex gap-2",
-                                    button {
-                                        class: "flex items-center gap-2 bg-white/20 text-white py-2 px-4 rounded-lg hover:bg-white/30 transition-colors",
-                                        onclick: refresh_pins,
-                                        "↻ Refresh"
+                                    if *active_tab.read() == ActiveTab::Pins {
+                                        button {
+                                            class: "flex items-center gap-2 bg-white/20 text-white py-2 px-4 rounded-lg hover:bg-white/30 transition-colors",
+                                            onclick: refresh_pins,
+                                            "↻ Refresh"
+                                        }
                                     }
                                     button {
                                         class: "flex items-center gap-2 bg-white/10 text-white/80 py-2 px-4 rounded-lg hover:bg-white/20 transition-colors",
                                         onclick: move |_| {
                                             authenticated.set(false);
                                             pins.set(Vec::new());
+                                            self_info.set(None);
+                                            active_tab.set(ActiveTab::Pins);
                                         },
                                         "Logout"
                                     }
@@ -269,23 +551,33 @@ fn App() -> Element {
                                 }
                             }
 
-                            if pins.read().is_empty() {
-                                div { class: "text-center py-12",
-                                    div { class: "text-4xl mb-4", "📭" }
-                                    p { class: "text-gray-500 text-lg", "No pins found" }
-                                    p { class: "text-gray-400 text-sm mt-1", "Upload some paths to create your first pin" }
-                                }
-                            } else {
-                                TreeNodeView {
-                                    node: build_pin_tree(&pins.read()),
-                                    path: String::new(),
-                                    depth: 0,
-                                    server_url: server_url.read().clone(),
-                                    token: token.read().clone(),
-                                    on_refresh: move |_| async move {
-                                        if let Ok(fetched_pins) = fetch_pins(&server_url.read(), &token.read()).await {
-                                            pins.set(fetched_pins);
+                            match *active_tab.read() {
+                                ActiveTab::Pins => rsx! {
+                                    if pins.read().is_empty() {
+                                        div { class: "text-center py-12",
+                                            div { class: "text-4xl mb-4", "📭" }
+                                            p { class: "text-gray-500 text-lg", "No pins found" }
+                                            p { class: "text-gray-400 text-sm mt-1", "Upload some paths to create your first pin" }
                                         }
+                                    } else {
+                                        TreeNodeView {
+                                            node: build_pin_tree(&pins.read()),
+                                            path: String::new(),
+                                            depth: 0,
+                                            server_url: server_url.read().clone(),
+                                            token: token.read().clone(),
+                                            on_refresh: move |_| async move {
+                                                if let Ok(fetched_pins) = fetch_pins(&server_url.read(), &token.read()).await {
+                                                    pins.set(fetched_pins);
+                                                }
+                                            }
+                                        }
+                                    }
+                                },
+                                ActiveTab::Admin => rsx! {
+                                    AdminPanel {
+                                        server_url: server_url.read().clone(),
+                                        token: token.read().clone()
                                     }
                                 }
                             }
@@ -608,6 +900,594 @@ fn PinLeaf(
                                     if *abandoning.read() { "Abandoning..." } else { "🗑️ Abandon Pin" }
                                 }
                             }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+// ============ Admin Panel Components ============
+
+#[derive(Clone, Copy, PartialEq)]
+enum AdminTab {
+    Users,
+    Tokens,
+}
+
+#[component]
+fn AdminPanel(server_url: String, token: String) -> Element {
+    let mut admin_tab = use_signal(|| AdminTab::Users);
+    let mut users = use_signal(|| Vec::<AdminUserResponse>::new());
+    let mut tokens_list = use_signal(|| Vec::<AdminTokenResponse>::new());
+    let mut loading = use_signal(|| false);
+    let error = use_signal(|| Option::<String>::None);
+
+    // Load data on mount
+    let server_url_clone = server_url.clone();
+    let token_clone = token.clone();
+    use_effect(move || {
+        let server_url = server_url_clone.clone();
+        let token = token_clone.clone();
+        spawn(async move {
+            loading.set(true);
+            if let Ok(u) = fetch_users(&server_url, &token).await {
+                users.set(u);
+            }
+            if let Ok(t) = fetch_tokens(&server_url, &token).await {
+                tokens_list.set(t);
+            }
+            loading.set(false);
+        });
+    });
+
+    rsx! {
+        div {
+            // Sub-tabs
+            div { class: "flex gap-2 mb-6 border-b border-gray-200 pb-4",
+                button {
+                    class: if *admin_tab.read() == AdminTab::Users {
+                        "px-4 py-2 text-sm font-medium text-blue-600 bg-blue-50 rounded-lg"
+                    } else {
+                        "px-4 py-2 text-sm font-medium text-gray-600 hover:bg-gray-50 rounded-lg"
+                    },
+                    onclick: move |_| admin_tab.set(AdminTab::Users),
+                    "👥 Users ({users.read().len()})"
+                }
+                button {
+                    class: if *admin_tab.read() == AdminTab::Tokens {
+                        "px-4 py-2 text-sm font-medium text-blue-600 bg-blue-50 rounded-lg"
+                    } else {
+                        "px-4 py-2 text-sm font-medium text-gray-600 hover:bg-gray-50 rounded-lg"
+                    },
+                    onclick: move |_| admin_tab.set(AdminTab::Tokens),
+                    "🔑 Tokens ({tokens_list.read().len()})"
+                }
+            }
+
+            if let Some(err) = error.read().as_ref() {
+                div { class: "mb-4 p-4 bg-red-50 text-red-700 rounded-lg border border-red-200",
+                    "{err}"
+                }
+            }
+
+            if *loading.read() {
+                div { class: "text-center py-8 text-gray-500",
+                    "Loading..."
+                }
+            } else {
+                match *admin_tab.read() {
+                    AdminTab::Users => rsx! {
+                        UsersPanel {
+                            server_url: server_url.clone(),
+                            token: token.clone(),
+                            users: users.read().clone(),
+                            on_refresh: move |_| {
+                                let server_url = server_url.clone();
+                                let token = token.clone();
+                                spawn(async move {
+                                    if let Ok(u) = fetch_users(&server_url, &token).await {
+                                        users.set(u);
+                                    }
+                                });
+                            }
+                        }
+                    },
+                    AdminTab::Tokens => rsx! {
+                        TokensPanel {
+                            server_url: server_url.clone(),
+                            token: token.clone(),
+                            tokens: tokens_list.read().clone(),
+                            users: users.read().clone(),
+                            on_refresh: move |_| {
+                                let server_url = server_url.clone();
+                                let token = token.clone();
+                                spawn(async move {
+                                    if let Ok(t) = fetch_tokens(&server_url, &token).await {
+                                        tokens_list.set(t);
+                                    }
+                                });
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[component]
+fn UsersPanel(
+    server_url: String,
+    token: String,
+    users: Vec<AdminUserResponse>,
+    on_refresh: EventHandler<()>,
+) -> Element {
+    let mut show_create = use_signal(|| false);
+    let mut new_name = use_signal(|| String::new());
+    let mut new_is_admin = use_signal(|| false);
+    let mut creating = use_signal(|| false);
+    let mut create_error = use_signal(|| Option::<String>::None);
+
+    let server_url_create = server_url.clone();
+    let token_create = token.clone();
+    let handle_create = move |_| {
+        let server_url = server_url_create.clone();
+        let token = token_create.clone();
+        let name = new_name.read().clone();
+        let is_admin = *new_is_admin.read();
+        async move {
+            creating.set(true);
+            create_error.set(None);
+
+            match create_user(&server_url, &token, &name, is_admin).await {
+                Ok(_) => {
+                    show_create.set(false);
+                    new_name.set(String::new());
+                    new_is_admin.set(false);
+                    on_refresh.call(());
+                }
+                Err(e) => create_error.set(Some(e)),
+            }
+
+            creating.set(false);
+        }
+    };
+
+    rsx! {
+        div {
+            // Create button
+            div { class: "mb-4",
+                if *show_create.read() {
+                    div { class: "p-4 bg-gray-50 rounded-lg border border-gray-200",
+                        h3 { class: "font-medium text-gray-800 mb-3", "Create User" }
+                        if let Some(err) = create_error.read().as_ref() {
+                            div { class: "mb-3 p-3 bg-red-50 text-red-700 text-sm rounded border border-red-200",
+                                "{err}"
+                            }
+                        }
+                        div { class: "space-y-3",
+                            input {
+                                class: "w-full px-3 py-2 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500",
+                                r#type: "text",
+                                placeholder: "Username",
+                                value: "{new_name}",
+                                oninput: move |e| new_name.set(e.value())
+                            }
+                            label { class: "flex items-center gap-2 text-sm text-gray-700",
+                                input {
+                                    r#type: "checkbox",
+                                    checked: *new_is_admin.read(),
+                                    onchange: move |e| new_is_admin.set(e.checked())
+                                }
+                                "Admin"
+                            }
+                            div { class: "flex gap-2",
+                                button {
+                                    class: "px-4 py-2 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50",
+                                    disabled: *creating.read() || new_name.read().is_empty(),
+                                    onclick: handle_create,
+                                    if *creating.read() { "Creating..." } else { "Create" }
+                                }
+                                button {
+                                    class: "px-4 py-2 text-sm bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200",
+                                    onclick: move |_| show_create.set(false),
+                                    "Cancel"
+                                }
+                            }
+                        }
+                    }
+                } else {
+                    button {
+                        class: "px-4 py-2 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700",
+                        onclick: move |_| show_create.set(true),
+                        "+ Create User"
+                    }
+                }
+            }
+
+            // Users table
+            if users.is_empty() {
+                div { class: "text-center py-8 text-gray-500",
+                    "No users found"
+                }
+            } else {
+                div { class: "overflow-x-auto",
+                    table { class: "w-full text-sm",
+                        thead { class: "bg-gray-50",
+                            tr {
+                                th { class: "px-4 py-3 text-left text-gray-600 font-medium", "ID" }
+                                th { class: "px-4 py-3 text-left text-gray-600 font-medium", "Name" }
+                                th { class: "px-4 py-3 text-left text-gray-600 font-medium", "Admin" }
+                                th { class: "px-4 py-3 text-left text-gray-600 font-medium", "Created" }
+                                th { class: "px-4 py-3 text-left text-gray-600 font-medium", "Actions" }
+                            }
+                        }
+                        tbody {
+                            for user in users.iter() {
+                                UserRow {
+                                    key: "{user.id}",
+                                    user: user.clone(),
+                                    server_url: server_url.clone(),
+                                    token: token.clone(),
+                                    on_refresh: on_refresh.clone()
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[component]
+fn UserRow(
+    user: AdminUserResponse,
+    server_url: String,
+    token: String,
+    on_refresh: EventHandler<()>,
+) -> Element {
+    let mut deleting = use_signal(|| false);
+    let mut toggling = use_signal(|| false);
+
+    let user_id = user.id;
+    let is_admin = user.is_admin;
+
+    let server_url_toggle = server_url.clone();
+    let token_toggle = token.clone();
+    let handle_toggle = move |_| {
+        let server_url = server_url_toggle.clone();
+        let token = token_toggle.clone();
+        async move {
+            toggling.set(true);
+            if update_user(&server_url, &token, user_id, !is_admin).await.is_ok() {
+                on_refresh.call(());
+            }
+            toggling.set(false);
+        }
+    };
+
+    let server_url_delete = server_url.clone();
+    let token_delete = token.clone();
+    let handle_delete = move |_| {
+        let server_url = server_url_delete.clone();
+        let token = token_delete.clone();
+        async move {
+            deleting.set(true);
+            if delete_user(&server_url, &token, user_id).await.is_ok() {
+                on_refresh.call(());
+            }
+            deleting.set(false);
+        }
+    };
+
+    rsx! {
+        tr { class: "border-t border-gray-100 hover:bg-gray-50",
+            td { class: "px-4 py-3 text-gray-500 font-mono text-xs", "{user.id}" }
+            td { class: "px-4 py-3 font-medium text-gray-800", "{user.name}" }
+            td { class: "px-4 py-3",
+                if user.is_admin {
+                    span { class: "px-2 py-1 text-xs font-medium bg-purple-100 text-purple-700 rounded", "Admin" }
+                } else {
+                    span { class: "px-2 py-1 text-xs font-medium bg-gray-100 text-gray-600 rounded", "User" }
+                }
+            }
+            td { class: "px-4 py-3 text-gray-500 text-xs", "{user.created}" }
+            td { class: "px-4 py-3",
+                div { class: "flex gap-2",
+                    button {
+                        class: "px-3 py-1 text-xs bg-gray-100 text-gray-700 rounded hover:bg-gray-200 disabled:opacity-50",
+                        disabled: *toggling.read(),
+                        onclick: handle_toggle,
+                        if user.is_admin { "Demote" } else { "Promote" }
+                    }
+                    button {
+                        class: "px-3 py-1 text-xs bg-red-50 text-red-600 rounded hover:bg-red-100 disabled:opacity-50",
+                        disabled: *deleting.read(),
+                        onclick: handle_delete,
+                        "Delete"
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[component]
+fn TokensPanel(
+    server_url: String,
+    token: String,
+    tokens: Vec<AdminTokenResponse>,
+    users: Vec<AdminUserResponse>,
+    on_refresh: EventHandler<()>,
+) -> Element {
+    let mut show_create = use_signal(|| false);
+    let mut new_user_id = use_signal(|| Option::<i32>::None);
+    let mut new_description = use_signal(|| String::new());
+    let mut creating = use_signal(|| false);
+    let mut create_error = use_signal(|| Option::<String>::None);
+    let mut created_token = use_signal(|| Option::<String>::None);
+
+    let server_url_create = server_url.clone();
+    let token_create = token.clone();
+    let handle_create = move |_| {
+        let server_url = server_url_create.clone();
+        let token = token_create.clone();
+        let user_id = *new_user_id.read();
+        let desc = if new_description.read().is_empty() {
+            None
+        } else {
+            Some(new_description.read().clone())
+        };
+        async move {
+            creating.set(true);
+            create_error.set(None);
+
+            match create_token(&server_url, &token, user_id, desc.as_deref()).await {
+                Ok(resp) => {
+                    created_token.set(Some(resp.token));
+                    new_user_id.set(None);
+                    new_description.set(String::new());
+                    on_refresh.call(());
+                }
+                Err(e) => create_error.set(Some(e)),
+            }
+
+            creating.set(false);
+        }
+    };
+
+    rsx! {
+        div {
+            // Create section
+            div { class: "mb-4",
+                if let Some(token_value) = created_token.read().as_ref() {
+                    div { class: "p-4 bg-green-50 rounded-lg border border-green-200 mb-4",
+                        h3 { class: "font-medium text-green-800 mb-2", "Token Created!" }
+                        p { class: "text-sm text-green-700 mb-2", "Copy this token now - it won't be shown again:" }
+                        div { class: "flex gap-2",
+                            code { class: "flex-1 p-2 bg-white rounded border border-green-200 text-sm font-mono break-all",
+                                "{token_value}"
+                            }
+                        }
+                        button {
+                            class: "mt-3 px-4 py-2 text-sm bg-green-600 text-white rounded-lg hover:bg-green-700",
+                            onclick: move |_| {
+                                created_token.set(None);
+                                show_create.set(false);
+                            },
+                            "Done"
+                        }
+                    }
+                } else if *show_create.read() {
+                    div { class: "p-4 bg-gray-50 rounded-lg border border-gray-200",
+                        h3 { class: "font-medium text-gray-800 mb-3", "Create Token" }
+                        if let Some(err) = create_error.read().as_ref() {
+                            div { class: "mb-3 p-3 bg-red-50 text-red-700 text-sm rounded border border-red-200",
+                                "{err}"
+                            }
+                        }
+                        div { class: "space-y-3",
+                            div {
+                                label { class: "block text-sm text-gray-700 mb-1", "User (leave empty for system token)" }
+                                select {
+                                    class: "w-full px-3 py-2 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500",
+                                    onchange: move |e| {
+                                        let value = e.value();
+                                        if value.is_empty() {
+                                            new_user_id.set(None);
+                                        } else if let Ok(id) = value.parse::<i32>() {
+                                            new_user_id.set(Some(id));
+                                        }
+                                    },
+                                    option { value: "", "System Token (Admin)" }
+                                    for user in users.iter() {
+                                        option { value: "{user.id}", "{user.name}" }
+                                    }
+                                }
+                            }
+                            div {
+                                label { class: "block text-sm text-gray-700 mb-1", "Description (optional)" }
+                                input {
+                                    class: "w-full px-3 py-2 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500",
+                                    r#type: "text",
+                                    placeholder: "Token description",
+                                    value: "{new_description}",
+                                    oninput: move |e| new_description.set(e.value())
+                                }
+                            }
+                            div { class: "flex gap-2",
+                                button {
+                                    class: "px-4 py-2 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50",
+                                    disabled: *creating.read(),
+                                    onclick: handle_create,
+                                    if *creating.read() { "Creating..." } else { "Create" }
+                                }
+                                button {
+                                    class: "px-4 py-2 text-sm bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200",
+                                    onclick: move |_| show_create.set(false),
+                                    "Cancel"
+                                }
+                            }
+                        }
+                    }
+                } else {
+                    button {
+                        class: "px-4 py-2 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700",
+                        onclick: move |_| show_create.set(true),
+                        "+ Create Token"
+                    }
+                }
+            }
+
+            // Tokens table
+            if tokens.is_empty() {
+                div { class: "text-center py-8 text-gray-500",
+                    "No tokens found"
+                }
+            } else {
+                div { class: "overflow-x-auto",
+                    table { class: "w-full text-sm",
+                        thead { class: "bg-gray-50",
+                            tr {
+                                th { class: "px-4 py-3 text-left text-gray-600 font-medium", "ID" }
+                                th { class: "px-4 py-3 text-left text-gray-600 font-medium", "Type" }
+                                th { class: "px-4 py-3 text-left text-gray-600 font-medium", "User" }
+                                th { class: "px-4 py-3 text-left text-gray-600 font-medium", "Description" }
+                                th { class: "px-4 py-3 text-left text-gray-600 font-medium", "Created" }
+                                th { class: "px-4 py-3 text-left text-gray-600 font-medium", "Actions" }
+                            }
+                        }
+                        tbody {
+                            for t in tokens.iter() {
+                                TokenRow {
+                                    key: "{t.id}",
+                                    token_item: t.clone(),
+                                    server_url: server_url.clone(),
+                                    auth_token: token.clone(),
+                                    on_refresh: on_refresh.clone()
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[component]
+fn TokenRow(
+    token_item: AdminTokenResponse,
+    server_url: String,
+    auth_token: String,
+    on_refresh: EventHandler<()>,
+) -> Element {
+    let mut editing = use_signal(|| false);
+    let mut edit_desc = use_signal(|| token_item.description.clone().unwrap_or_default());
+    let mut saving = use_signal(|| false);
+    let mut deleting = use_signal(|| false);
+
+    let token_id = token_item.id;
+
+    let server_url_save = server_url.clone();
+    let auth_token_save = auth_token.clone();
+    let handle_save = move |_| {
+        let server_url = server_url_save.clone();
+        let auth_token = auth_token_save.clone();
+        async move {
+            saving.set(true);
+            let desc = if edit_desc.read().is_empty() {
+                None
+            } else {
+                Some(edit_desc.read().clone())
+            };
+            if update_token(&server_url, &auth_token, token_id, desc.as_deref()).await.is_ok() {
+                editing.set(false);
+                on_refresh.call(());
+            }
+            saving.set(false);
+        }
+    };
+
+    let server_url_delete = server_url.clone();
+    let auth_token_delete = auth_token.clone();
+    let handle_delete = move |_| {
+        let server_url = server_url_delete.clone();
+        let auth_token = auth_token_delete.clone();
+        async move {
+            deleting.set(true);
+            if delete_token(&server_url, &auth_token, token_id).await.is_ok() {
+                on_refresh.call(());
+            }
+            deleting.set(false);
+        }
+    };
+
+    rsx! {
+        tr { class: "border-t border-gray-100 hover:bg-gray-50",
+            td { class: "px-4 py-3 text-gray-500 font-mono text-xs", "{token_item.id}" }
+            td { class: "px-4 py-3",
+                if token_item.is_system {
+                    span { class: "px-2 py-1 text-xs font-medium bg-purple-100 text-purple-700 rounded", "System" }
+                } else {
+                    span { class: "px-2 py-1 text-xs font-medium bg-blue-100 text-blue-700 rounded", "User" }
+                }
+            }
+            td { class: "px-4 py-3 text-gray-700",
+                if let Some(name) = &token_item.user_name {
+                    "{name}"
+                } else {
+                    "-"
+                }
+            }
+            td { class: "px-4 py-3",
+                if *editing.read() {
+                    div { class: "flex gap-2",
+                        input {
+                            class: "flex-1 px-2 py-1 text-sm border border-gray-200 rounded focus:outline-none focus:ring-2 focus:ring-blue-500",
+                            r#type: "text",
+                            value: "{edit_desc}",
+                            oninput: move |e| edit_desc.set(e.value())
+                        }
+                        button {
+                            class: "px-2 py-1 text-xs bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-50",
+                            disabled: *saving.read(),
+                            onclick: handle_save,
+                            "Save"
+                        }
+                        button {
+                            class: "px-2 py-1 text-xs bg-gray-100 text-gray-700 rounded hover:bg-gray-200",
+                            onclick: move |_| editing.set(false),
+                            "Cancel"
+                        }
+                    }
+                } else {
+                    span { class: "text-gray-600 text-sm",
+                        if let Some(desc) = &token_item.description {
+                            "{desc}"
+                        } else {
+                            "-"
+                        }
+                    }
+                }
+            }
+            td { class: "px-4 py-3 text-gray-500 text-xs", "{token_item.created}" }
+            td { class: "px-4 py-3",
+                if !*editing.read() {
+                    div { class: "flex gap-2",
+                        button {
+                            class: "px-3 py-1 text-xs bg-gray-100 text-gray-700 rounded hover:bg-gray-200",
+                            onclick: move |_| editing.set(true),
+                            "Edit"
+                        }
+                        button {
+                            class: "px-3 py-1 text-xs bg-red-50 text-red-600 rounded hover:bg-red-100 disabled:opacity-50",
+                            disabled: *deleting.read(),
+                            onclick: handle_delete,
+                            "Delete"
                         }
                     }
                 }

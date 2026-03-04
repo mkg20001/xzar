@@ -259,3 +259,76 @@ pub struct PinRoot {
     pub drv_id: String,
     pub drv_full: String,
 }
+
+// ============ Self/Auth Info Response ============
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SelfResponse {
+    pub is_admin: bool,
+    pub credential_type: String,
+    pub user: Option<UserInfo>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct UserInfo {
+    pub id: i32,
+    pub name: String,
+}
+
+// ============ Admin API Types ============
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AdminUserResponse {
+    pub id: i32,
+    pub name: String,
+    pub is_admin: bool,
+    pub created: NaiveDateTime,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AdminTokenResponse {
+    pub id: i32,
+    pub user_id: Option<i32>,
+    pub user_name: Option<String>,
+    pub is_system: bool,
+    pub description: Option<String>,
+    pub created: NaiveDateTime,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CreateUserRequest {
+    pub name: String,
+    #[serde(default)]
+    pub is_admin: bool,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UpdateUserRequest {
+    pub is_admin: bool,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CreateTokenRequest {
+    pub user_id: Option<i32>,
+    #[serde(default)]
+    pub description: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CreateTokenResponse {
+    pub id: i32,
+    pub token: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UpdateTokenRequest {
+    pub description: Option<String>,
+}

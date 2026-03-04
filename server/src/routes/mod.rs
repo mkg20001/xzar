@@ -1,15 +1,21 @@
+pub mod admin;
+pub mod auth_info;
 pub mod cache_info;
 pub mod check;
 pub mod lock;
 pub mod nar;
 pub mod narinfo;
 pub mod pin;
+pub mod ui;
 pub mod upload;
 
+pub use admin::*;
+pub use auth_info::*;
 pub use cache_info::*;
 pub use check::*;
 pub use lock::*;
 pub use nar::*;
 pub use narinfo::*;
 pub use pin::*;
+pub use ui::*;
 pub use upload::*;

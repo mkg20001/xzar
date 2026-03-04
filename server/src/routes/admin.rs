@@ -1,0 +1,249 @@
+//! Admin management endpoints
+//!
+//! All routes require AdminUser (admin privileges)
+
+use diesel::prelude::*;
+use rocket::serde::json::Json;
+use rocket::{delete, get, post, put};
+
+use crate::auth::{hash_token, AdminUser};
+use crate::db::Db;
+use crate::error::{AppError, Result};
+use crate::models::{
+    AdminTokenResponse, AdminUserResponse, CreateTokenRequest, CreateTokenResponse,
+    CreateUserRequest, NewToken, NewUser, Token, UpdateTokenRequest, UpdateUserRequest, User,
+};
+use crate::schema::{tokens, users};
+
+// ============ Users ============
+
+/// GET /admin/users
+/// List all users
+#[get("/admin/users")]
+pub fn list_users(_admin: AdminUser, db: Db) -> Result<Json<Vec<AdminUserResponse>>> {
+    let mut conn = db.0;
+
+    let all_users: Vec<User> = users::table.order(users::id.asc()).load(&mut conn)?;
+
+    let response: Vec<AdminUserResponse> = all_users
+        .into_iter()
+        .map(|u| AdminUserResponse {
+            id: u.id,
+            name: u.name,
+            is_admin: u.is_admin,
+            created: u.created,
+        })
+        .collect();
+
+    Ok(Json(response))
+}
+
+/// POST /admin/users
+/// Create a new user
+#[post("/admin/users", data = "<request>")]
+pub fn create_user(
+    _admin: AdminUser,
+    db: Db,
+    request: Json<CreateUserRequest>,
+) -> Result<Json<AdminUserResponse>> {
+    let mut conn = db.0;
+
+    // Validate name
+    if request.name.is_empty() || request.name.len() > 128 {
+        return Err(AppError::BadRequest(
+            "Name must be 1-128 characters".to_string(),
+        ));
+    }
+
+    let new_user = NewUser {
+        name: request.name.clone(),
+        is_admin: request.is_admin,
+    };
+
+    let user: User = diesel::insert_into(users::table)
+        .values(&new_user)
+        .get_result(&mut conn)?;
+
+    Ok(Json(AdminUserResponse {
+        id: user.id,
+        name: user.name,
+        is_admin: user.is_admin,
+        created: user.created,
+    }))
+}
+
+/// PUT /admin/users/<id>
+/// Update a user (is_admin only)
+#[put("/admin/users/<id>", data = "<request>")]
+pub fn update_user(
+    _admin: AdminUser,
+    db: Db,
+    id: i32,
+    request: Json<UpdateUserRequest>,
+) -> Result<Json<AdminUserResponse>> {
+    let mut conn = db.0;
+
+    let updated = diesel::update(users::table.filter(users::id.eq(id)))
+        .set(users::is_admin.eq(request.is_admin))
+        .execute(&mut conn)?;
+
+    if updated == 0 {
+        return Err(AppError::NotFound("User not found".to_string()));
+    }
+
+    let user: User = users::table.find(id).first(&mut conn)?;
+
+    Ok(Json(AdminUserResponse {
+        id: user.id,
+        name: user.name,
+        is_admin: user.is_admin,
+        created: user.created,
+    }))
+}
+
+/// DELETE /admin/users/<id>
+/// Delete a user
+#[delete("/admin/users/<id>")]
+pub fn delete_user(_admin: AdminUser, db: Db, id: i32) -> Result<Json<bool>> {
+    let mut conn = db.0;
+
+    let deleted = diesel::delete(users::table.filter(users::id.eq(id))).execute(&mut conn)?;
+
+    if deleted == 0 {
+        return Err(AppError::NotFound("User not found".to_string()));
+    }
+
+    Ok(Json(true))
+}
+
+// ============ Tokens ============
+
+/// GET /admin/tokens
+/// List all tokens (with user info)
+#[get("/admin/tokens")]
+pub fn list_tokens(_admin: AdminUser, db: Db) -> Result<Json<Vec<AdminTokenResponse>>> {
+    let mut conn = db.0;
+
+    let all_tokens: Vec<(Token, Option<User>)> = tokens::table
+        .left_join(users::table)
+        .order(tokens::id.asc())
+        .select((Token::as_select(), Option::<User>::as_select()))
+        .load(&mut conn)?;
+
+    let response: Vec<AdminTokenResponse> = all_tokens
+        .into_iter()
+        .map(|(token, user)| AdminTokenResponse {
+            id: token.id,
+            user_id: token.user_id,
+            user_name: user.map(|u| u.name),
+            is_system: token.is_system,
+            description: token.description,
+            created: token.created,
+        })
+        .collect();
+
+    Ok(Json(response))
+}
+
+/// POST /admin/tokens
+/// Create a new token
+#[post("/admin/tokens", data = "<request>")]
+pub fn create_token(
+    _admin: AdminUser,
+    db: Db,
+    request: Json<CreateTokenRequest>,
+) -> Result<Json<CreateTokenResponse>> {
+    let mut conn = db.0;
+
+    // Determine if this is a system token or user token
+    let is_system = request.user_id.is_none();
+
+    // If user_id is provided, verify user exists
+    if let Some(user_id) = request.user_id {
+        let user_exists: bool = users::table
+            .filter(users::id.eq(user_id))
+            .count()
+            .get_result::<i64>(&mut conn)
+            .map(|count| count > 0)?;
+
+        if !user_exists {
+            return Err(AppError::BadRequest("User not found".to_string()));
+        }
+    }
+
+    // Generate random token
+    let raw_token: String = {
+        use rand::Rng;
+        let bytes: [u8; 32] = rand::thread_rng().gen();
+        bytes.iter().map(|b| format!("{:02x}", b)).collect()
+    };
+
+    let token_hash = hash_token(&raw_token);
+
+    let new_token = NewToken {
+        user_id: request.user_id,
+        token_hash,
+        is_system,
+        description: request.description.clone(),
+    };
+
+    let token: Token = diesel::insert_into(tokens::table)
+        .values(&new_token)
+        .get_result(&mut conn)?;
+
+    Ok(Json(CreateTokenResponse {
+        id: token.id,
+        token: raw_token,
+    }))
+}
+
+/// PUT /admin/tokens/<id>
+/// Update a token (description only)
+#[put("/admin/tokens/<id>", data = "<request>")]
+pub fn update_token(
+    _admin: AdminUser,
+    db: Db,
+    id: i32,
+    request: Json<UpdateTokenRequest>,
+) -> Result<Json<AdminTokenResponse>> {
+    let mut conn = db.0;
+
+    let updated = diesel::update(tokens::table.filter(tokens::id.eq(id)))
+        .set(tokens::description.eq(&request.description))
+        .execute(&mut conn)?;
+
+    if updated == 0 {
+        return Err(AppError::NotFound("Token not found".to_string()));
+    }
+
+    // Fetch updated token with user info
+    let (token, user): (Token, Option<User>) = tokens::table
+        .left_join(users::table)
+        .filter(tokens::id.eq(id))
+        .select((Token::as_select(), Option::<User>::as_select()))
+        .first(&mut conn)?;
+
+    Ok(Json(AdminTokenResponse {
+        id: token.id,
+        user_id: token.user_id,
+        user_name: user.map(|u| u.name),
+        is_system: token.is_system,
+        description: token.description,
+        created: token.created,
+    }))
+}
+
+/// DELETE /admin/tokens/<id>
+/// Delete/revoke a token
+#[delete("/admin/tokens/<id>")]
+pub fn delete_token(_admin: AdminUser, db: Db, id: i32) -> Result<Json<bool>> {
+    let mut conn = db.0;
+
+    let deleted = diesel::delete(tokens::table.filter(tokens::id.eq(id))).execute(&mut conn)?;
+
+    if deleted == 0 {
+        return Err(AppError::NotFound("Token not found".to_string()));
+    }
+
+    Ok(Json(true))
+}
