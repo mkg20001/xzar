@@ -458,15 +458,13 @@ async fn test_client_upload_hello() {
         .trim()
         .to_string();
 
-    eprintln!("Built: {}", store_path);
-
     // Start server
     let mut server = TestServerProcess::start();
     if !server.wait_ready().await {
         panic!("Server failed to start");
     }
 
-    // Run xzar client to upload
+    // Run xzar client to upload with leave-after-abandon
     let output = Command::new(client_binary())
         .args([
             "--server",
@@ -476,25 +474,33 @@ async fn test_client_upload_hello() {
             "upload",
             "--pin",
             "test-hello",
+            "--leave-after-abandon",
+            "7d",
             &store_path,
         ])
         .output()
         .expect("Failed to run xzar");
 
-    let stdout = String::from_utf8_lossy(&output.stdout);
     let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(output.status.success(), "xzar upload failed: {}", stderr);
 
-    eprintln!("stdout: {}", stdout);
-    eprintln!("stderr: {}", stderr);
+    // Verify leave-after-abandon is stored by listing pins
+    let list_output = Command::new(client_binary())
+        .args([
+            "--server",
+            &server.url(),
+            "--key",
+            &server.upload_token,
+            "list",
+        ])
+        .output()
+        .expect("Failed to run xzar list");
 
+    let list_stdout = String::from_utf8_lossy(&list_output.stdout);
     assert!(
-        output.status.success(),
-        "xzar should succeed. stderr: {}",
-        stderr
-    );
-    assert!(
-        stdout.contains("Done!") || stdout.contains("Pin"),
-        "Should indicate completion"
+        list_stdout.contains("Leave after abandon: 1w"),
+        "Should show leave after abandon duration. Got: {}",
+        list_stdout
     );
 }
 
