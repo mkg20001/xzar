@@ -96,6 +96,15 @@ pub fn update_user(
         return Err(AppError::NotFound("User not found".to_string()));
     }
 
+    // Validate name if provided
+    if let Some(ref name) = request.name {
+        if name.is_empty() || name.len() > 128 {
+            return Err(AppError::BadRequest(
+                "Name must be 1-128 characters".to_string(),
+            ));
+        }
+    }
+
     // Validate email if provided
     if let Some(Some(ref email)) = request.email {
         if email.len() > 256 {
@@ -103,6 +112,13 @@ pub fn update_user(
                 "Email must be at most 256 characters".to_string(),
             ));
         }
+    }
+
+    // Update name if specified
+    if let Some(ref name) = request.name {
+        diesel::update(users::table.filter(users::id.eq(id)))
+            .set(users::name.eq(name))
+            .execute(&mut conn)?;
     }
 
     // Update is_admin if specified

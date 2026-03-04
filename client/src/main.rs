@@ -102,6 +102,20 @@ enum UserAction {
         /// User ID
         id: i32,
     },
+    /// Rename a user
+    Rename {
+        /// User ID
+        id: i32,
+        /// New username
+        name: String,
+    },
+    /// Set user email
+    SetEmail {
+        /// User ID
+        id: i32,
+        /// New email (omit to clear)
+        email: Option<String>,
+    },
 }
 
 #[derive(Subcommand, Debug)]
@@ -376,7 +390,7 @@ async fn cmd_user(api: ApiClient, action: UserAction) -> Result<()> {
         }
 
         UserAction::Promote { id } => {
-            api.update_user(id, Some(true), None)
+            api.update_user(id, None, Some(true), None)
                 .await
                 .context("Failed to promote user")?;
 
@@ -384,11 +398,30 @@ async fn cmd_user(api: ApiClient, action: UserAction) -> Result<()> {
         }
 
         UserAction::Demote { id } => {
-            api.update_user(id, Some(false), None)
+            api.update_user(id, None, Some(false), None)
                 .await
                 .context("Failed to demote user")?;
 
             println!("Demoted user {} from admin", id);
+        }
+
+        UserAction::Rename { id, name } => {
+            let user = api
+                .update_user(id, Some(name.clone()), None, None)
+                .await
+                .context("Failed to rename user")?;
+
+            println!("Renamed user {} to '{}'", id, user.name);
+        }
+
+        UserAction::SetEmail { id, email } => {
+            let user = api
+                .update_user(id, None, None, Some(email.clone()))
+                .await
+                .context("Failed to set user email")?;
+
+            let email_display = user.email.as_deref().unwrap_or("(none)");
+            println!("Set user {} email to {}", id, email_display);
         }
     }
 

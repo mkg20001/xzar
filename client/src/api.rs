@@ -292,10 +292,15 @@ impl ApiClient {
     pub async fn update_user(
         &self,
         user_id: i32,
+        name: Option<String>,
         is_admin: Option<bool>,
         email: Option<Option<String>>,
     ) -> Result<AdminUserResponse> {
-        let request = UpdateUserRequest { is_admin, email };
+        let request = UpdateUserRequest {
+            name,
+            is_admin,
+            email,
+        };
 
         let response = self
             .client

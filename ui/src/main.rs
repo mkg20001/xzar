@@ -202,6 +202,7 @@ async fn update_user(
     server_url: &str,
     token: &str,
     user_id: i32,
+    name: Option<String>,
     is_admin: Option<bool>,
     email: Option<Option<String>>,
 ) -> Result<(), String> {
@@ -210,6 +211,9 @@ async fn update_user(
 
     // Build request body with only specified fields
     let mut body = serde_json::Map::new();
+    if let Some(name) = name {
+        body.insert("name".to_string(), serde_json::json!(name));
+    }
     if let Some(is_admin) = is_admin {
         body.insert("isAdmin".to_string(), serde_json::json!(is_admin));
     }
@@ -1116,7 +1120,7 @@ fn UserRow(
             toggling.set(true);
             let server_url = SERVER_URL.read().clone();
             let token = TOKEN.read().clone();
-            if update_user(&server_url, &token, user_id, Some(!is_admin), None).await.is_ok() {
+            if update_user(&server_url, &token, user_id, None, Some(!is_admin), None).await.is_ok() {
                 on_refresh.call(());
             }
             toggling.set(false);
@@ -1138,7 +1142,25 @@ fn UserRow(
     rsx! {
         tr { class: "border-t border-gray-100 hover:bg-gray-50",
             td { class: "px-4 py-3 text-gray-500 font-mono text-xs", "{user.id}" }
-            td { class: "px-4 py-3 font-medium text-gray-800", "{user.name}" }
+            td { class: "px-4 py-3 font-medium text-gray-800",
+                InlineEdit {
+                    value: Some(user.name.clone()),
+                    placeholder: "(unnamed)",
+                    on_save: move |new_name: Option<String>| {
+                        if let Some(name) = new_name {
+                            if !name.is_empty() {
+                                spawn(async move {
+                                    let server_url = SERVER_URL.read().clone();
+                                    let token = TOKEN.read().clone();
+                                    if update_user(&server_url, &token, user_id, Some(name), None, None).await.is_ok() {
+                                        on_refresh.call(());
+                                    }
+                                });
+                            }
+                        }
+                    }
+                }
+            }
             td { class: "px-4 py-3",
                 InlineEdit {
                     value: user.email.clone(),
@@ -1147,7 +1169,7 @@ fn UserRow(
                         spawn(async move {
                             let server_url = SERVER_URL.read().clone();
                             let token = TOKEN.read().clone();
-                            if update_user(&server_url, &token, user_id, None, Some(new_email)).await.is_ok() {
+                            if update_user(&server_url, &token, user_id, None, None, Some(new_email)).await.is_ok() {
                                 on_refresh.call(());
                             }
                         });

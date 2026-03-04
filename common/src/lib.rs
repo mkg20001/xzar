@@ -148,6 +148,8 @@ pub struct CreateUserRequest {
 #[serde(rename_all = "camelCase")]
 pub struct UpdateUserRequest {
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub is_admin: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub email: Option<Option<String>>,
