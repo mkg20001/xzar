@@ -51,7 +51,6 @@ in
           host = "/run/postgresql";
           database = "xzar";
         };
-        migrations = builtins.unsafeDiscardStringContext "${pkgs.xzar-server}/migrations";
       };
     };
 
