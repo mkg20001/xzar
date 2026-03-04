@@ -400,7 +400,7 @@ async fn run_server(
         let cors = CorsOptions::default()
             .allowed_origins(allowed_origins)
             .allowed_methods(
-                vec![Method::Get, Method::Post, Method::Put, Method::Delete, Method::Options]
+                vec![Method::Get, Method::Post, Method::Put, Method::Patch, Method::Delete, Method::Options]
                     .into_iter()
                     .map(From::from)
                     .collect(),
@@ -445,7 +445,6 @@ async fn run_server(
                 routes::list_users,
                 routes::create_user,
                 routes::update_user,
-                routes::update_user_email,
                 routes::delete_user,
                 routes::list_tokens,
                 routes::create_token,

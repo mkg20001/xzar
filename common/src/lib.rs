@@ -143,18 +143,14 @@ pub struct CreateUserRequest {
     pub is_admin: bool,
 }
 
-/// Request to update a user's admin status
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// Request to update a user (PATCH style - only specified fields are updated)
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct UpdateUserRequest {
-    pub is_admin: bool,
-}
-
-/// Request to update a user's email
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct UpdateUserEmailRequest {
-    pub email: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub is_admin: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub email: Option<Option<String>>,
 }
 
 /// Request to create a token

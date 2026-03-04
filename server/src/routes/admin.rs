@@ -4,15 +4,14 @@
 
 use diesel::prelude::*;
 use rocket::serde::json::Json;
-use rocket::{delete, get, post, put};
+use rocket::{delete, get, patch, post, put};
 
 use crate::auth::{hash_token, AdminUser};
 use crate::db::Db;
 use crate::error::{AppError, Result};
 use crate::models::{
     AdminTokenResponse, AdminUserResponse, CreateTokenRequest, CreateTokenResponse,
-    CreateUserRequest, NewToken, NewUser, Token, UpdateTokenRequest, UpdateUserEmailRequest,
-    UpdateUserRequest, User,
+    CreateUserRequest, NewToken, NewUser, Token, UpdateTokenRequest, UpdateUserRequest, User,
 };
 use crate::schema::{tokens, users};
 
@@ -75,9 +74,9 @@ pub fn create_user(
     }))
 }
 
-/// PUT /admin/users/<id>
-/// Update a user (is_admin only)
-#[put("/admin/users/<id>", data = "<request>")]
+/// PATCH /admin/users/<id>
+/// Update a user (PATCH style - only specified fields are updated)
+#[patch("/admin/users/<id>", data = "<request>")]
 pub fn update_user(
     _admin: AdminUser,
     db: Db,
@@ -86,38 +85,19 @@ pub fn update_user(
 ) -> Result<Json<AdminUserResponse>> {
     let mut conn = db.0;
 
-    let updated = diesel::update(users::table.filter(users::id.eq(id)))
-        .set(users::is_admin.eq(request.is_admin))
-        .execute(&mut conn)?;
+    // Check if user exists
+    let user_exists = users::table
+        .filter(users::id.eq(id))
+        .count()
+        .get_result::<i64>(&mut conn)
+        .map(|count| count > 0)?;
 
-    if updated == 0 {
+    if !user_exists {
         return Err(AppError::NotFound("User not found".to_string()));
     }
 
-    let user: User = users::table.find(id).first(&mut conn)?;
-
-    Ok(Json(AdminUserResponse {
-        id: user.id,
-        name: user.name,
-        email: user.email,
-        is_admin: user.is_admin,
-        created: user.created.to_string(),
-    }))
-}
-
-/// PUT /admin/users/<id>/email
-/// Update a user's email
-#[put("/admin/users/<id>/email", data = "<request>")]
-pub fn update_user_email(
-    _admin: AdminUser,
-    db: Db,
-    id: i32,
-    request: Json<UpdateUserEmailRequest>,
-) -> Result<Json<AdminUserResponse>> {
-    let mut conn = db.0;
-
     // Validate email if provided
-    if let Some(ref email) = request.email {
+    if let Some(Some(ref email)) = request.email {
         if email.len() > 256 {
             return Err(AppError::BadRequest(
                 "Email must be at most 256 characters".to_string(),
@@ -125,12 +105,18 @@ pub fn update_user_email(
         }
     }
 
-    let updated = diesel::update(users::table.filter(users::id.eq(id)))
-        .set(users::email.eq(&request.email))
-        .execute(&mut conn)?;
+    // Update is_admin if specified
+    if let Some(is_admin) = request.is_admin {
+        diesel::update(users::table.filter(users::id.eq(id)))
+            .set(users::is_admin.eq(is_admin))
+            .execute(&mut conn)?;
+    }
 
-    if updated == 0 {
-        return Err(AppError::NotFound("User not found".to_string()));
+    // Update email if specified
+    if let Some(ref email) = request.email {
+        diesel::update(users::table.filter(users::id.eq(id)))
+            .set(users::email.eq(email))
+            .execute(&mut conn)?;
     }
 
     let user: User = users::table.find(id).first(&mut conn)?;

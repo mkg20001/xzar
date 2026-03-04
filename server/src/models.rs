@@ -264,6 +264,5 @@ pub struct PinRoot {
 // Re-export admin API types from common
 pub use xzar_common::{
     AdminTokenResponse, AdminUserResponse, CreateTokenRequest, CreateTokenResponse,
-    CreateUserRequest, SelfResponse, UpdateTokenRequest, UpdateUserEmailRequest,
-    UpdateUserRequest, UserInfo,
+    CreateUserRequest, SelfResponse, UpdateTokenRequest, UpdateUserRequest, UserInfo,
 };

@@ -197,33 +197,30 @@ async fn create_user(server_url: &str, token: &str, name: &str, is_admin: bool) 
         .map_err(|e| format!("Failed to parse response: {}", e))
 }
 
-async fn update_user(server_url: &str, token: &str, user_id: i32, is_admin: bool) -> Result<(), String> {
+/// Update user with PATCH - only specified fields are updated
+async fn update_user(
+    server_url: &str,
+    token: &str,
+    user_id: i32,
+    is_admin: Option<bool>,
+    email: Option<Option<String>>,
+) -> Result<(), String> {
     let client = reqwest::Client::new();
     let url = format!("{}/admin/users/{}", server_url.trim_end_matches('/'), user_id);
 
-    let response = client
-        .put(&url)
-        .header("Authorization", format!("Bearer {}", token))
-        .json(&serde_json::json!({ "isAdmin": is_admin }))
-        .send()
-        .await
-        .map_err(|e| format!("Request failed: {}", e))?;
-
-    if !response.status().is_success() {
-        return Err(format!("Server error: {}", response.status()));
+    // Build request body with only specified fields
+    let mut body = serde_json::Map::new();
+    if let Some(is_admin) = is_admin {
+        body.insert("isAdmin".to_string(), serde_json::json!(is_admin));
+    }
+    if let Some(email) = email {
+        body.insert("email".to_string(), serde_json::json!(email));
     }
 
-    Ok(())
-}
-
-async fn update_user_email(server_url: &str, token: &str, user_id: i32, email: Option<&str>) -> Result<(), String> {
-    let client = reqwest::Client::new();
-    let url = format!("{}/admin/users/{}/email", server_url.trim_end_matches('/'), user_id);
-
     let response = client
-        .put(&url)
+        .patch(&url)
         .header("Authorization", format!("Bearer {}", token))
-        .json(&serde_json::json!({ "email": email }))
+        .json(&body)
         .send()
         .await
         .map_err(|e| format!("Request failed: {}", e))?;
@@ -1119,7 +1116,7 @@ fn UserRow(
             toggling.set(true);
             let server_url = SERVER_URL.read().clone();
             let token = TOKEN.read().clone();
-            if update_user(&server_url, &token, user_id, !is_admin).await.is_ok() {
+            if update_user(&server_url, &token, user_id, Some(!is_admin), None).await.is_ok() {
                 on_refresh.call(());
             }
             toggling.set(false);
@@ -1150,7 +1147,7 @@ fn UserRow(
                         spawn(async move {
                             let server_url = SERVER_URL.read().clone();
                             let token = TOKEN.read().clone();
-                            if update_user_email(&server_url, &token, user_id, new_email.as_deref()).await.is_ok() {
+                            if update_user(&server_url, &token, user_id, None, Some(new_email)).await.is_ok() {
                                 on_refresh.call(());
                             }
                         });
