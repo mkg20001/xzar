@@ -9,23 +9,74 @@ fn main() {
     dioxus::launch(App);
 }
 
-/// Group pins by name, with non-abandoned pins first in each group
-fn group_pins(pins: &[Pin]) -> Vec<(String, Vec<Pin>)> {
-    let mut groups: BTreeMap<String, Vec<Pin>> = BTreeMap::new();
+/// A node in the pin tree structure
+#[derive(Debug, Clone, Default, PartialEq)]
+struct PinTreeNode {
+    /// Pins at this exact path
+    pins: Vec<Pin>,
+    /// Child nodes (path segment -> child)
+    children: BTreeMap<String, PinTreeNode>,
+}
 
+impl PinTreeNode {
+    /// Insert a pin into the tree based on its name (split by /)
+    fn insert(&mut self, pin: Pin) {
+        let parts: Vec<String> = pin.name.split('/').map(|s| s.to_string()).collect();
+        let parts_ref: Vec<&str> = parts.iter().map(|s| s.as_str()).collect();
+        self.insert_at_path(&parts_ref, pin);
+    }
+
+    fn insert_at_path(&mut self, path: &[&str], pin: Pin) {
+        if path.is_empty() || (path.len() == 1 && path[0].is_empty()) {
+            self.pins.push(pin);
+        } else if path.len() == 1 {
+            // Leaf node - this is the final segment
+            self.children
+                .entry(path[0].to_string())
+                .or_default()
+                .pins
+                .push(pin);
+        } else {
+            // Intermediate node
+            self.children
+                .entry(path[0].to_string())
+                .or_default()
+                .insert_at_path(&path[1..], pin);
+        }
+    }
+
+    /// Check if this node has any active (non-abandoned) pins in its subtree
+    fn has_active_pins(&self) -> bool {
+        self.pins.iter().any(|p| !p.abandoned)
+            || self.children.values().any(|c| c.has_active_pins())
+    }
+
+    /// Count total pins in subtree
+    #[allow(dead_code)]
+    fn total_pins(&self) -> usize {
+        self.pins.len() + self.children.values().map(|c| c.total_pins()).sum::<usize>()
+    }
+
+    /// Count active pins in subtree
+    fn active_pins(&self) -> usize {
+        self.pins.iter().filter(|p| !p.abandoned).count()
+            + self.children.values().map(|c| c.active_pins()).sum::<usize>()
+    }
+
+    /// Count abandoned pins in subtree
+    fn abandoned_pins(&self) -> usize {
+        self.pins.iter().filter(|p| p.abandoned).count()
+            + self.children.values().map(|c| c.abandoned_pins()).sum::<usize>()
+    }
+}
+
+/// Build a tree from a list of pins
+fn build_pin_tree(pins: &[Pin]) -> PinTreeNode {
+    let mut root = PinTreeNode::default();
     for pin in pins {
-        groups.entry(pin.name.clone()).or_default().push(pin.clone());
+        root.insert(pin.clone());
     }
-
-    // Sort each group: non-abandoned first
-    for pins in groups.values_mut() {
-        pins.sort_by_key(|p| p.abandoned);
-    }
-
-    // Convert to vec, sorted by whether the first pin is abandoned (active groups first)
-    let mut result: Vec<_> = groups.into_iter().collect();
-    result.sort_by_key(|(_, pins)| pins.first().is_some_and(|p| p.abandoned));
-    result
+    root
 }
 
 async fn fetch_pins(server_url: &str, token: &str) -> Result<Vec<Pin>, String> {
@@ -195,18 +246,16 @@ fn App() -> Element {
                                 "No pins found"
                             }
                         } else {
-                            div { class: "space-y-6",
-                                for (name, group) in group_pins(&pins.read()) {
-                                    PinGroup {
-                                        key: "{name}",
-                                        name: name,
-                                        pins: group,
-                                        server_url: server_url.read().clone(),
-                                        token: token.read().clone(),
-                                        on_refresh: move |_| async move {
-                                            if let Ok(fetched_pins) = fetch_pins(&server_url.read(), &token.read()).await {
-                                                pins.set(fetched_pins);
-                                            }
+                            div { class: "space-y-1",
+                                TreeNodeView {
+                                    node: build_pin_tree(&pins.read()),
+                                    path: String::new(),
+                                    depth: 0,
+                                    server_url: server_url.read().clone(),
+                                    token: token.read().clone(),
+                                    on_refresh: move |_| async move {
+                                        if let Ok(fetched_pins) = fetch_pins(&server_url.read(), &token.read()).await {
+                                            pins.set(fetched_pins);
                                         }
                                     }
                                 }
@@ -220,9 +269,10 @@ fn App() -> Element {
 }
 
 #[component]
-fn PinGroup(
-    name: String,
-    pins: Vec<Pin>,
+fn TreeNodeView(
+    node: PinTreeNode,
+    path: String,
+    depth: usize,
     server_url: String,
     token: String,
     on_refresh: EventHandler<()>,
@@ -230,95 +280,104 @@ fn PinGroup(
     let mut expanded = use_signal(|| true);
     let mut show_abandoned = use_signal(|| false);
 
-    let active_pins: Vec<_> = pins.iter().filter(|p| !p.abandoned).cloned().collect();
-    let abandoned_pins: Vec<_> = pins.iter().filter(|p| p.abandoned).cloned().collect();
-    let abandoned_count = abandoned_pins.len();
+    let has_pins = !node.pins.is_empty();
+
+    let active_pins: Vec<_> = node.pins.iter().filter(|p| !p.abandoned).cloned().collect();
+    let abandoned_pins: Vec<_> = node.pins.iter().filter(|p| p.abandoned).cloned().collect();
+
+    // Sort children: those with active pins first
+    let mut sorted_children: Vec<_> = node.children.into_iter().collect();
+    sorted_children.sort_by_key(|(_, child)| !child.has_active_pins());
+
+    let indent_class = match depth {
+        0 => "",
+        1 => "ml-4",
+        2 => "ml-8",
+        3 => "ml-12",
+        _ => "ml-16",
+    };
 
     rsx! {
-        div { class: "border border-gray-200 rounded-lg overflow-hidden",
-            // Header - clickable to collapse/expand
-            button {
-                class: "w-full bg-gray-50 px-4 py-3 border-b border-gray-200 text-left hover:bg-gray-100 transition-colors",
-                onclick: move |_| {
-                    let current = *expanded.read();
-                    expanded.set(!current);
-                },
-                div { class: "flex justify-between items-center",
-                    div { class: "flex items-center gap-2",
-                        span { class: "text-gray-400 text-sm",
+        div { class: "{indent_class}",
+            // Render children (directories)
+            for (name, child) in sorted_children.iter() {
+                div { class: "border-l-2 border-gray-200 my-1",
+                    // Directory header
+                    button {
+                        class: "w-full flex items-center gap-2 px-3 py-2 text-left hover:bg-gray-50 rounded-r transition-colors",
+                        onclick: move |_| {
+                            let current = *expanded.read();
+                            expanded.set(!current);
+                        },
+                        span { class: "text-gray-400 text-xs w-4",
                             if *expanded.read() { "▼" } else { "▶" }
                         }
-                        h3 { class: "text-lg font-semibold text-gray-800", "{name}" }
-                    }
-                    div { class: "flex items-center gap-2",
-                        span { class: "text-xs text-gray-500",
-                            "{active_pins.len()} active"
-                        }
-                        if abandoned_count > 0 {
-                            span { class: "text-xs text-gray-400",
-                                "+ {abandoned_count} abandoned"
+                        span { class: "font-medium text-gray-700", "{name}/" }
+                        span { class: "text-xs text-gray-400 ml-auto",
+                            if child.active_pins() > 0 {
+                                "{child.active_pins()} active"
                             }
+                            if child.abandoned_pins() > 0 {
+                                " +{child.abandoned_pins()} abandoned"
+                            }
+                        }
+                    }
+
+                    // Child content
+                    if *expanded.read() {
+                        TreeNodeView {
+                            node: child.clone(),
+                            path: if path.is_empty() { name.clone() } else { format!("{}/{}", path, name) },
+                            depth: depth + 1,
+                            server_url: server_url.clone(),
+                            token: token.clone(),
+                            on_refresh: on_refresh.clone()
                         }
                     }
                 }
             }
 
-            // Content - collapsible
-            if *expanded.read() {
-                div { class: "divide-y divide-gray-100",
-                    // Active pins
-                    for pin in active_pins.iter() {
-                        div { class: "pl-4",
-                            PinCard {
-                                key: "{pin.id}",
-                                pin: pin.clone(),
-                                server_url: server_url.clone(),
-                                token: token.clone(),
-                                on_abandoned: move |_| {
-                                    on_refresh.call(());
-                                }
+            // Render pins at this level (leaves)
+            if has_pins {
+                // Active pins
+                for pin in active_pins.iter() {
+                    div { class: "border-l-2 border-green-300 my-1",
+                        PinLeaf {
+                            pin: pin.clone(),
+                            server_url: server_url.clone(),
+                            token: token.clone(),
+                            on_abandoned: move |_| {
+                                on_refresh.call(());
                             }
                         }
                     }
+                }
 
-                    // Show abandoned toggle
-                    if abandoned_count > 0 {
-                        if *show_abandoned.read() {
-                            // Abandoned pins
-                            for pin in abandoned_pins.iter() {
-                                div { class: "pl-4",
-                                    PinCard {
-                                        key: "{pin.id}",
-                                        pin: pin.clone(),
-                                        server_url: server_url.clone(),
-                                        token: token.clone(),
-                                        on_abandoned: move |_| {
-                                            on_refresh.call(());
-                                        }
+                // Abandoned pins toggle
+                if !abandoned_pins.is_empty() {
+                    if *show_abandoned.read() {
+                        for pin in abandoned_pins.iter() {
+                            div { class: "border-l-2 border-gray-300 my-1",
+                                PinLeaf {
+                                    pin: pin.clone(),
+                                    server_url: server_url.clone(),
+                                    token: token.clone(),
+                                    on_abandoned: move |_| {
+                                        on_refresh.call(());
                                     }
                                 }
                             }
-                            button {
-                                class: "w-full px-4 py-2 text-sm text-gray-500 hover:text-gray-700 hover:bg-gray-50 text-left pl-8",
-                                onclick: move |e| {
-                                    e.stop_propagation();
-                                    show_abandoned.set(false);
-                                },
-                                "Hide abandoned pins"
-                            }
-                        } else {
-                            button {
-                                class: "w-full px-4 py-2 text-sm text-gray-500 hover:text-gray-700 hover:bg-gray-50 text-left pl-8",
-                                onclick: move |e| {
-                                    e.stop_propagation();
-                                    show_abandoned.set(true);
-                                },
-                                if abandoned_count == 1 {
-                                    "View 1 abandoned pin..."
-                                } else {
-                                    "View {abandoned_count} abandoned pins..."
-                                }
-                            }
+                        }
+                        button {
+                            class: "text-xs text-gray-400 hover:text-gray-600 px-3 py-1",
+                            onclick: move |_| show_abandoned.set(false),
+                            "Hide abandoned"
+                        }
+                    } else {
+                        button {
+                            class: "text-xs text-gray-400 hover:text-gray-600 px-3 py-1",
+                            onclick: move |_| show_abandoned.set(true),
+                            "Show {abandoned_pins.len()} abandoned..."
                         }
                     }
                 }
@@ -328,12 +387,13 @@ fn PinGroup(
 }
 
 #[component]
-fn PinCard(
+fn PinLeaf(
     pin: Pin,
     server_url: String,
     token: String,
     on_abandoned: EventHandler<()>,
 ) -> Element {
+    let mut expanded = use_signal(|| false);
     let mut abandoning = use_signal(|| false);
     let mut abandon_error = use_signal(|| Option::<String>::None);
 
@@ -342,7 +402,8 @@ fn PinCard(
     let server_url_clone = server_url.clone();
     let token_clone = token.clone();
 
-    let handle_abandon = move |_| {
+    let handle_abandon = move |e: Event<MouseData>| {
+        e.stop_propagation();
         let server_url = server_url_clone.clone();
         let token = token_clone.clone();
         async move {
@@ -380,58 +441,76 @@ fn PinCard(
 
     let bg_class = if pin.abandoned { "bg-gray-50" } else { "bg-white" };
 
+    // Get the leaf name (last part of the path)
+    let leaf_name = pin.name.split('/').last().unwrap_or(&pin.name);
+
     rsx! {
-        div { class: "p-4 {bg_class}",
-            div { class: "flex justify-between items-start mb-3",
-                div {
-                    if let Some(desc) = &pin.description {
-                        p { class: "text-sm text-gray-500", "{desc}" }
+        div { class: "{bg_class} rounded-r",
+            // Header row
+            button {
+                class: "w-full flex items-center gap-2 px-3 py-2 text-left hover:bg-gray-50 transition-colors",
+                onclick: move |_| {
+                    let current = *expanded.read();
+                    expanded.set(!current);
+                },
+                span { class: "text-gray-400 text-xs w-4",
+                    if *expanded.read() { "▼" } else { "▶" }
+                }
+                span { class: "font-medium text-gray-800", "{leaf_name}" }
+                span { class: "px-2 py-0.5 text-xs font-medium rounded-full {status_class} ml-2",
+                    "{status_text}"
+                }
+                span { class: "text-xs text-gray-400 ml-auto",
+                    "{pin.roots.len()} roots"
+                }
+                if !is_abandoned {
+                    button {
+                        class: "px-2 py-1 text-xs bg-red-500 text-white rounded hover:bg-red-600 disabled:opacity-50 ml-2",
+                        disabled: *abandoning.read(),
+                        onclick: handle_abandon,
+                        if *abandoning.read() { "..." } else { "Abandon" }
                     }
                 }
-                div { class: "flex items-center gap-2",
-                    span { class: "px-2 py-1 text-xs font-medium rounded-full {status_class}",
-                        "{status_text}"
-                    }
-                    if !is_abandoned {
-                        button {
-                            class: "px-3 py-1 text-sm bg-red-500 text-white rounded hover:bg-red-600 disabled:opacity-50",
-                            disabled: *abandoning.read(),
-                            onclick: handle_abandon,
-                            if *abandoning.read() { "..." } else { "Abandon" }
+            }
+
+            // Expanded details
+            if *expanded.read() {
+                div { class: "px-3 py-2 ml-6 text-sm border-t border-gray-100",
+                    if let Some(err) = abandon_error.read().as_ref() {
+                        div { class: "mb-2 p-2 bg-red-100 text-red-700 text-xs rounded",
+                            "{err}"
                         }
                     }
-                }
-            }
 
-            if let Some(err) = abandon_error.read().as_ref() {
-                div { class: "mb-3 p-2 bg-red-100 text-red-700 text-sm rounded",
-                    "{err}"
-                }
-            }
-
-            div { class: "text-sm text-gray-600 space-y-1",
-                div { "ID: {pin.id}" }
-                div { "Created: {pin.created}" }
-                if let Some(expires) = &pin.expires {
-                    div { "Expires: {expires}" }
-                }
-                if let Some(leave) = pin.leave_after_abandon {
-                    div { "Leave after abandon: {format_duration(leave)}" }
-                }
-            }
-
-            if !pin.roots.is_empty() {
-                div { class: "mt-3",
-                    h4 { class: "text-sm font-medium text-gray-700 mb-2",
-                        "Roots ({pin.roots.len()})"
+                    if let Some(desc) = &pin.description {
+                        p { class: "text-gray-500 mb-2", "{desc}" }
                     }
-                    div { class: "space-y-1",
-                        for root in pin.roots.iter() {
-                            div {
-                                key: "{root.drv_id}",
-                                class: "text-xs font-mono bg-gray-100 p-2 rounded truncate",
-                                title: "/nix/store/{root.drv_full}",
-                                "/nix/store/{root.drv_full}"
+
+                    div { class: "text-xs text-gray-500 space-y-1",
+                        div { "ID: {pin.id}" }
+                        div { "Created: {pin.created}" }
+                        if let Some(expires) = &pin.expires {
+                            div { "Expires: {expires}" }
+                        }
+                        if let Some(leave) = pin.leave_after_abandon {
+                            div { "Leave after abandon: {format_duration(leave)}" }
+                        }
+                    }
+
+                    if !pin.roots.is_empty() {
+                        div { class: "mt-2",
+                            h4 { class: "text-xs font-medium text-gray-600 mb-1",
+                                "Roots:"
+                            }
+                            div { class: "space-y-1",
+                                for root in pin.roots.iter() {
+                                    div {
+                                        key: "{root.drv_id}",
+                                        class: "text-xs font-mono bg-gray-100 p-1.5 rounded truncate",
+                                        title: "/nix/store/{root.drv_full}",
+                                        "/nix/store/{root.drv_full}"
+                                    }
+                                }
                             }
                         }
                     }
