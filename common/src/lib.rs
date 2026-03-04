@@ -4,28 +4,45 @@ use serde::{Deserialize, Serialize};
 
 // ============ Duration Formatting ============
 
-/// Format milliseconds as human-readable duration
+/// Format milliseconds as human-readable duration with combined units
+/// e.g., 8 days -> "1w 1d", 400 days -> "1y 1m 5d"
 pub fn format_duration(ms: i64) -> String {
     const DAY_MS: i64 = 24 * 60 * 60 * 1000;
     const WEEK_MS: i64 = 7 * DAY_MS;
     const MONTH_MS: i64 = 30 * DAY_MS;
     const YEAR_MS: i64 = 365 * DAY_MS;
 
-    if ms >= YEAR_MS {
-        let years = ms / YEAR_MS;
-        format!("{}y", years)
-    } else if ms >= MONTH_MS {
-        let months = ms / MONTH_MS;
-        format!("{}m", months)
-    } else if ms >= WEEK_MS {
-        let weeks = ms / WEEK_MS;
-        format!("{}w", weeks)
-    } else if ms >= DAY_MS {
-        let days = ms / DAY_MS;
-        format!("{}d", days)
-    } else {
-        format!("{}ms", ms)
+    if ms < DAY_MS {
+        return format!("{}ms", ms);
     }
+
+    let mut remaining = ms;
+    let mut parts = Vec::new();
+
+    if remaining >= YEAR_MS {
+        let years = remaining / YEAR_MS;
+        remaining %= YEAR_MS;
+        parts.push(format!("{}y", years));
+    }
+
+    if remaining >= MONTH_MS {
+        let months = remaining / MONTH_MS;
+        remaining %= MONTH_MS;
+        parts.push(format!("{}m", months));
+    }
+
+    if remaining >= WEEK_MS {
+        let weeks = remaining / WEEK_MS;
+        remaining %= WEEK_MS;
+        parts.push(format!("{}w", weeks));
+    }
+
+    if remaining >= DAY_MS {
+        let days = remaining / DAY_MS;
+        parts.push(format!("{}d", days));
+    }
+
+    parts.join(" ")
 }
 
 // ============ API Types ============
@@ -185,11 +202,21 @@ mod tests {
 
     #[test]
     fn test_format_duration() {
+        const DAY: i64 = 86400000;
+
+        // Simple cases
         assert_eq!(format_duration(500), "500ms");
-        assert_eq!(format_duration(86400000), "1d");
-        assert_eq!(format_duration(86400000 * 7), "1w");
-        assert_eq!(format_duration(86400000 * 30), "1m");
-        assert_eq!(format_duration(86400000 * 365), "1y");
-        assert_eq!(format_duration(86400000 * 14), "2w");
+        assert_eq!(format_duration(DAY), "1d");
+        assert_eq!(format_duration(DAY * 7), "1w");
+        assert_eq!(format_duration(DAY * 30), "1m");
+        assert_eq!(format_duration(DAY * 365), "1y");
+        assert_eq!(format_duration(DAY * 14), "2w");
+
+        // Combined units
+        assert_eq!(format_duration(DAY * 8), "1w 1d");
+        assert_eq!(format_duration(DAY * 10), "1w 3d");
+        assert_eq!(format_duration(DAY * 35), "1m 5d");
+        assert_eq!(format_duration(DAY * 37), "1m 1w");
+        assert_eq!(format_duration(DAY * 400), "1y 1m 5d");
     }
 }
