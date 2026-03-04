@@ -114,6 +114,7 @@ struct TestServerProcess {
     key_name: String,
     database_name: String,
     base_database_url: String,
+    config_path: PathBuf,
     _storage_dir: TempDir,
     _config_dir: TempDir,
 }
@@ -273,6 +274,7 @@ rocket:
             key_name,
             database_name,
             base_database_url,
+            config_path,
             _storage_dir: storage_dir,
             _config_dir: config_dir,
         }
@@ -324,6 +326,26 @@ rocket:
     /// Get the server URL
     fn url(&self) -> String {
         format!("http://127.0.0.1:{}", self.port)
+    }
+
+    /// Run garbage collection via CLI command
+    async fn run_gc(&self) -> Result<(), String> {
+        let output = Command::new(server_binary())
+            .args(["gc"])
+            .env("XZAR_CONFIG", self.config_path.to_str().unwrap())
+            .env_remove("DATABASE_URL")
+            .env_remove("TEST_DATABASE_URL")
+            .output()
+            .expect("Failed to run xzar-server gc");
+
+        if output.status.success() {
+            Ok(())
+        } else {
+            Err(format!(
+                "GC failed: {}",
+                String::from_utf8_lossy(&output.stderr)
+            ))
+        }
     }
 }
 
@@ -782,4 +804,97 @@ async fn test_nix_store_realise_from_cache() {
     );
 
     eprintln!("Successfully fetched {} from cache!", path_name);
+}
+
+/// Test that GC respects leave_after_abandon when pins are replaced
+#[tokio::test]
+async fn test_gc_respects_leave_after_abandon() {
+    if !database_available() {
+        eprintln!("Skipping test: no database configured");
+        return;
+    }
+
+    if !nix_available() {
+        eprintln!("Skipping test: nix not available");
+        return;
+    }
+
+    // Build hello package
+    let build_output = Command::new("nix-build")
+        .args(["<nixpkgs>", "-A", "hello", "--no-out-link"])
+        .output()
+        .expect("Failed to run nix-build");
+
+    if !build_output.status.success() {
+        panic!(
+            "nix-build failed: {}",
+            String::from_utf8_lossy(&build_output.stderr)
+        );
+    }
+
+    let store_path = String::from_utf8_lossy(&build_output.stdout)
+        .trim()
+        .to_string();
+
+    // Start server
+    let mut server = TestServerProcess::start();
+    if !server.wait_ready().await {
+        panic!("Server failed to start");
+    }
+
+    // First upload with leave-after-abandon
+    let output = Command::new(client_binary())
+        .args([
+            "--server",
+            &server.url(),
+            "--key",
+            &server.upload_token,
+            "upload",
+            "--pin",
+            "test-gc-pin",
+            "--leave-after-abandon",
+            "7d",
+            &store_path,
+        ])
+        .output()
+        .expect("Failed to run xzar");
+
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(output.status.success(), "First upload failed: {}", stderr);
+
+    // Second upload with same pin name (should abandon the first)
+    let output = Command::new(client_binary())
+        .args([
+            "--server",
+            &server.url(),
+            "--key",
+            &server.upload_token,
+            "upload",
+            "--pin",
+            "test-gc-pin",
+            &store_path,
+        ])
+        .output()
+        .expect("Failed to run xzar");
+
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(output.status.success(), "Second upload failed: {}", stderr);
+
+    // Run GC via the test harness
+    server.run_gc().await.expect("GC failed");
+
+    // Verify the narinfo is still accessible (data not GC'd because leave_after_abandon)
+    let drv_id = store_path
+        .strip_prefix("/nix/store/")
+        .unwrap()
+        .split('-')
+        .next()
+        .unwrap();
+    let narinfo_url = format!("{}/{}.narinfo", server.url(), drv_id);
+    let response = reqwest::get(&narinfo_url).await.expect("Failed to fetch narinfo");
+
+    assert!(
+        response.status().is_success(),
+        "Narinfo was GC'd but should have been kept due to leave_after_abandon"
+    );
 }

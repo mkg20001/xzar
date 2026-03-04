@@ -112,6 +112,10 @@ pub struct TestServer {
     _storage_dir: TempDir,
     /// Server port
     pub port: u16,
+    /// Database pool for direct database access in tests
+    pub pool: Pool<ConnectionManager<PgConnection>>,
+    /// Storage for GC tests
+    pub storage: Storage,
 }
 
 /// Builder for creating test servers
@@ -225,6 +229,10 @@ impl TestServerBuilder {
             .await
             .expect("Failed to initialize test storage");
 
+        // Clone pool and storage for test access
+        let test_pool = pool.clone();
+        let test_storage = storage.clone();
+
         // Build rocket instance without starting GC
         let rocket = rocket::build()
             .manage(Database(pool))
@@ -254,6 +262,8 @@ impl TestServerBuilder {
             credentials,
             _storage_dir: storage_dir,
             port,
+            pool: test_pool,
+            storage: test_storage,
         }
     }
 }
@@ -306,6 +316,11 @@ impl TestServer {
                 "Authorization",
                 format!("Bearer {}", self.credentials.upload_token),
             ))
+    }
+
+    /// Run garbage collection
+    pub async fn run_gc(&self) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        crate::gc::run_gc(&self.pool, &self.storage).await
     }
 }
 

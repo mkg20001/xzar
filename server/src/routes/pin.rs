@@ -65,12 +65,24 @@ pub fn finalize_pin(
     // Mark previous pins with the same name as abandoned
     let now = Utc::now().naive_utc();
 
-    diesel::update(pins::table.filter(pins::name.eq(&request.name)))
-        .set((
-            pins::abandoned.eq(true),
-            pins::expires.eq(Some(now)),
-        ))
-        .execute(&mut conn)?;
+    // Fetch old pins to respect their leave_after_abandon setting
+    let old_pins: Vec<Pin> = pins::table
+        .filter(pins::name.eq(&request.name))
+        .filter(pins::abandoned.eq(false))
+        .load(&mut conn)?;
+
+    for old_pin in old_pins {
+        let expires = match old_pin.leave_after_abandon {
+            Some(ms) => now + Duration::milliseconds(ms),
+            None => now,
+        };
+        diesel::update(pins::table.filter(pins::id.eq(old_pin.id)))
+            .set((
+                pins::abandoned.eq(true),
+                pins::expires.eq(Some(expires)),
+            ))
+            .execute(&mut conn)?;
+    }
 
     // Calculate expires timestamp
     let expires = request

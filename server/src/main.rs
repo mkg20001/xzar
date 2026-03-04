@@ -39,6 +39,9 @@ enum Command {
     /// Start the server (default)
     Serve,
 
+    /// Run garbage collection once and exit
+    Gc,
+
     /// User management commands
     User {
         #[command(subcommand)]
@@ -128,6 +131,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     match args.command.unwrap_or(Command::Serve) {
         Command::Serve => run_server(config, pool).await,
+        Command::Gc => run_gc_once(config, pool).await,
         Command::User { action } => {
             handle_user_action(pool, action)?;
             Ok(())
@@ -314,6 +318,24 @@ fn handle_token_action(
             }
         }
     }
+
+    Ok(())
+}
+
+async fn run_gc_once(
+    config: Config,
+    pool: Pool<ConnectionManager<PgConnection>>,
+) -> Result<(), Box<dyn std::error::Error>> {
+    // Initialize storage
+    let storage = Storage::new(&config.storage)
+        .await
+        .expect("Failed to initialize storage");
+
+    println!("Running garbage collection...");
+    gc::run_gc(&pool, &storage)
+        .await
+        .map_err(|e| e as Box<dyn std::error::Error>)?;
+    println!("Garbage collection completed.");
 
     Ok(())
 }

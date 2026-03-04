@@ -5370,6 +5370,8 @@ version = "0.1.0"
 dependencies = [
  "assert_cmd",
  "base64",
+ "chrono",
+ "diesel",
  "ed25519-dalek",
  "predicates",
  "rand 0.8.5",

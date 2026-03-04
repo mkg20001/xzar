@@ -36,3 +36,7 @@ predicates = "3"
 
 # For generating public keys
 ed25519-dalek = "2"
+
+# For database access in GC tests
+diesel = { version = "2", features = ["postgres", "chrono"] }
+chrono = "0.4"
