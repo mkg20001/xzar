@@ -696,7 +696,7 @@ async fn test_nix_store_realise_from_cache() {
         panic!("xzar upload failed: {}", stderr);
     }
 
-    // Debug: Fetch the narinfo to see if signature is present
+    // Verify narinfo has a signature
     let drv_id = store_path
         .strip_prefix("/nix/store/")
         .unwrap()
@@ -704,67 +704,13 @@ async fn test_nix_store_realise_from_cache() {
         .next()
         .unwrap();
     let narinfo_url = format!("{}/{}.narinfo", server.url(), drv_id);
-    eprintln!("Fetching narinfo from: {}", narinfo_url);
-
     let narinfo_response = reqwest::get(&narinfo_url).await.expect("Failed to fetch narinfo");
     let narinfo_text = narinfo_response.text().await.expect("Failed to read narinfo");
-    eprintln!("Narinfo content:\n{}", narinfo_text);
 
-    // Verify Sig field is present
     assert!(
         narinfo_text.contains("Sig:"),
         "Narinfo should contain a Sig field"
     );
-
-    // Parse narinfo and verify signature manually
-    let mut nar_hash = String::new();
-    let mut nar_size: i64 = 0;
-    let mut references: Vec<String> = Vec::new();
-    let mut sig_value = String::new();
-
-    for line in narinfo_text.lines() {
-        if let Some(value) = line.strip_prefix("NarHash: ") {
-            nar_hash = value.to_string();
-        } else if let Some(value) = line.strip_prefix("NarSize: ") {
-            nar_size = value.parse().unwrap_or(0);
-        } else if let Some(value) = line.strip_prefix("References: ") {
-            references = value.split_whitespace().map(|s| s.to_string()).collect();
-            references.sort();
-        } else if let Some(value) = line.strip_prefix("Sig: ") {
-            sig_value = value.to_string();
-        }
-    }
-
-    // Compute the expected fingerprint (must match Nix's format exactly)
-    let refs_str: String = references
-        .iter()
-        .map(|r| format!("/nix/store/{}", r))
-        .collect::<Vec<_>>()
-        .join(",");
-    let fingerprint = format!(
-        "1;{};{};{};{}",
-        store_path, nar_hash, nar_size, refs_str
-    );
-    eprintln!("Computed fingerprint: {}", fingerprint);
-
-    // Verify signature using ed25519_dalek
-    use ed25519_dalek::{Signature, Verifier};
-    let dalek_key = ed25519_dalek::SigningKey::from_bytes(&server.signing_secret);
-    let verifying_key = dalek_key.verifying_key();
-
-    let expected_prefix = format!("{}:", server.key_name);
-    let sig_b64 = sig_value.strip_prefix(&expected_prefix).expect("Sig should have key name prefix");
-    let sig_bytes = base64::Engine::decode(&base64::engine::general_purpose::STANDARD, sig_b64)
-        .expect("Failed to decode signature base64");
-    let signature = Signature::from_slice(&sig_bytes).expect("Invalid signature bytes");
-
-    match verifying_key.verify(fingerprint.as_bytes(), &signature) {
-        Ok(_) => eprintln!("Manual signature verification PASSED"),
-        Err(e) => {
-            eprintln!("Manual signature verification FAILED: {}", e);
-            eprintln!("This indicates the fingerprint format may differ from what the server signed");
-        }
-    }
 
     // Create a temporary Nix store for testing
     let temp_store = TempDir::new().expect("Failed to create temp store dir");
@@ -772,59 +718,38 @@ async fn test_nix_store_realise_from_cache() {
     let nix_store_path = store_root.join("nix/store");
     std::fs::create_dir_all(&nix_store_path).expect("Failed to create nix/store dir");
 
-    // Extract the hash part of the store path for nix-store --realise
-    // Store path format: /nix/store/<hash>-<name>
     let path_name = store_path
         .strip_prefix("/nix/store/")
         .expect("Invalid store path");
 
-    eprintln!("Attempting to fetch {} from cache", path_name);
-    eprintln!("Using store root: {}", store_root.display());
-
-    // Use nix-store --realise to fetch from the cache
-    // We use --store to specify a local store with a custom root
+    // Use nix copy to fetch from the cache to a local store
     let store_url = format!("local?root={}", store_root.display());
-    // Use cache.localhost to match the key name format
     let substituters = format!("http://cache.localhost:{}", server.port);
 
-    // TODO: Signature verification with nix-store --realise is not working yet.
-    // The signature is valid (manual verification passes) but nix-store rejects it.
-    // For now, use require-sigs=false to test the basic cache functionality.
-    let realise_output = Command::new("nix-store")
+    // Configure Nix to use our cache with signature verification
+    let nix_config = format!(
+        "substituters = {}\ntrusted-substituters = {}\ntrusted-public-keys = {}\nrequire-sigs = true\nnarinfo-cache-positive-ttl = 0\nnarinfo-cache-negative-ttl = 0\n",
+        substituters, substituters, public_key
+    );
+
+    let copy_output = Command::new("nix")
         .args([
-            "--realise",
-            &store_path,
-            "--store",
+            "copy",
+            "--from",
+            &substituters,
+            "--to",
             &store_url,
-            "--option",
-            "substituters",
-            &substituters,
-            "--option",
-            "trusted-substituters",
-            &substituters,
-            "--option",
-            "trusted-public-keys",
-            &public_key,
-            "--option",
-            "require-sigs",
-            "false",
-            "--option",
-            "narinfo-cache-negative-ttl",
-            "0",
+            &store_path,
         ])
+        .env("NIX_CONFIG", &nix_config)
         .output()
-        .expect("Failed to run nix-store --realise");
+        .expect("Failed to run nix copy");
 
-    let realise_stdout = String::from_utf8_lossy(&realise_output.stdout);
-    let realise_stderr = String::from_utf8_lossy(&realise_output.stderr);
-
-    eprintln!("nix-store --realise stdout: {}", realise_stdout);
-    eprintln!("nix-store --realise stderr: {}", realise_stderr);
-
+    let copy_stderr = String::from_utf8_lossy(&copy_output.stderr);
     assert!(
-        realise_output.status.success(),
-        "nix-store --realise failed: {}",
-        realise_stderr
+        copy_output.status.success(),
+        "nix copy failed: {}",
+        copy_stderr
     );
 
     // Verify the path exists in our temp store
