@@ -163,90 +163,119 @@ fn App() -> Element {
 
     rsx! {
         document::Style { {TAILWIND_CSS} }
-        div { class: "min-h-screen bg-gray-100 py-8",
+        div { class: "min-h-screen bg-gradient-to-br from-gray-50 to-gray-100 py-8",
             div { class: "max-w-6xl mx-auto px-4",
-                h1 { class: "text-3xl font-bold text-gray-800 mb-8", "xzar Binary Cache" }
+                // Header
+                div { class: "text-center mb-8",
+                    h1 { class: "text-3xl font-bold text-gray-800 flex items-center justify-center gap-3",
+                        span { "⚡" }
+                        "xzar Binary Cache"
+                    }
+                    p { class: "text-gray-500 mt-2", "Nix store path caching made simple" }
+                }
 
                 // Login form
                 if !*authenticated.read() {
-                    div { class: "bg-white rounded-lg shadow-md p-6 mb-6",
-                        h2 { class: "text-xl font-semibold text-gray-700 mb-4", "Connect to Server" }
-
-                        div { class: "space-y-4",
-                            div {
-                                label { class: "block text-sm font-medium text-gray-700 mb-1",
-                                    "Server URL"
-                                }
-                                input {
-                                    class: "w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500",
-                                    r#type: "text",
-                                    placeholder: "http://localhost:17788",
-                                    value: "{server_url}",
-                                    oninput: move |e| server_url.set(e.value())
-                                }
+                    div { class: "max-w-md mx-auto",
+                        div { class: "bg-white rounded-xl shadow-lg overflow-hidden",
+                            // Header
+                            div { class: "bg-gradient-to-r from-blue-600 to-blue-700 px-6 py-8 text-center",
+                                div { class: "text-4xl mb-3", "🔐" }
+                                h2 { class: "text-xl font-semibold text-white", "Connect to Server" }
+                                p { class: "text-blue-200 text-sm mt-1", "Enter your cache server details" }
                             }
 
-                            div {
-                                label { class: "block text-sm font-medium text-gray-700 mb-1",
-                                    "Token"
+                            // Form
+                            div { class: "p-6 space-y-5",
+                                div {
+                                    label { class: "block text-sm font-medium text-gray-700 mb-2",
+                                        "Server URL"
+                                    }
+                                    input {
+                                        class: "w-full px-4 py-3 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-shadow",
+                                        r#type: "text",
+                                        placeholder: "http://localhost:17788",
+                                        value: "{server_url}",
+                                        oninput: move |e| server_url.set(e.value())
+                                    }
                                 }
-                                input {
-                                    class: "w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500",
-                                    r#type: "password",
-                                    placeholder: "Enter your upload token",
-                                    value: "{token}",
-                                    oninput: move |e| token.set(e.value())
+
+                                div {
+                                    label { class: "block text-sm font-medium text-gray-700 mb-2",
+                                        "Token"
+                                    }
+                                    input {
+                                        class: "w-full px-4 py-3 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-shadow",
+                                        r#type: "password",
+                                        placeholder: "Enter your upload token",
+                                        value: "{token}",
+                                        oninput: move |e| token.set(e.value())
+                                    }
                                 }
-                            }
 
-                            button {
-                                class: "w-full bg-blue-600 text-white py-2 px-4 rounded-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-50",
-                                disabled: *loading.read(),
-                                onclick: load_pins,
-                                if *loading.read() { "Connecting..." } else { "Connect" }
-                            }
-                        }
+                                button {
+                                    class: "w-full bg-blue-600 text-white py-3 px-4 rounded-lg font-medium hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 disabled:opacity-50 transition-colors",
+                                    disabled: *loading.read(),
+                                    onclick: load_pins,
+                                    if *loading.read() { "⏳ Connecting..." } else { "→ Connect" }
+                                }
 
-                        if let Some(err) = error.read().as_ref() {
-                            div { class: "mt-4 p-3 bg-red-100 text-red-700 rounded-md",
-                                "{err}"
+                                if let Some(err) = error.read().as_ref() {
+                                    div { class: "p-4 bg-red-50 text-red-700 rounded-lg border border-red-200 flex items-start gap-2",
+                                        span { class: "flex-shrink-0", "⚠️" }
+                                        span { "{err}" }
+                                    }
+                                }
                             }
                         }
                     }
                 } else {
                     // Authenticated view
-                    div { class: "bg-white rounded-lg shadow-md p-6 mb-6",
-                        div { class: "flex justify-between items-center mb-4",
-                            h2 { class: "text-xl font-semibold text-gray-700", "Pins" }
-                            div { class: "flex gap-2",
-                                button {
-                                    class: "bg-gray-200 text-gray-700 py-2 px-4 rounded-md hover:bg-gray-300 focus:outline-none focus:ring-2 focus:ring-gray-400",
-                                    onclick: refresh_pins,
-                                    "Refresh"
+                    div { class: "bg-white rounded-xl shadow-lg overflow-hidden",
+                        // Header bar
+                        div { class: "bg-gradient-to-r from-blue-600 to-blue-700 px-6 py-4",
+                            div { class: "flex justify-between items-center",
+                                div { class: "flex items-center gap-3",
+                                    span { class: "text-2xl", "📌" }
+                                    h2 { class: "text-xl font-semibold text-white", "Pins" }
+                                    span { class: "text-blue-200 text-sm",
+                                        "({pins.read().len()} total)"
+                                    }
                                 }
-                                button {
-                                    class: "bg-red-100 text-red-700 py-2 px-4 rounded-md hover:bg-red-200 focus:outline-none focus:ring-2 focus:ring-red-400",
-                                    onclick: move |_| {
-                                        authenticated.set(false);
-                                        pins.set(Vec::new());
-                                    },
-                                    "Logout"
+                                div { class: "flex gap-2",
+                                    button {
+                                        class: "flex items-center gap-2 bg-white/20 text-white py-2 px-4 rounded-lg hover:bg-white/30 transition-colors",
+                                        onclick: refresh_pins,
+                                        "↻ Refresh"
+                                    }
+                                    button {
+                                        class: "flex items-center gap-2 bg-white/10 text-white/80 py-2 px-4 rounded-lg hover:bg-white/20 transition-colors",
+                                        onclick: move |_| {
+                                            authenticated.set(false);
+                                            pins.set(Vec::new());
+                                        },
+                                        "Logout"
+                                    }
                                 }
                             }
                         }
 
-                        if let Some(err) = error.read().as_ref() {
-                            div { class: "mb-4 p-3 bg-red-100 text-red-700 rounded-md",
-                                "{err}"
+                        // Content area
+                        div { class: "p-6",
+                            if let Some(err) = error.read().as_ref() {
+                                div { class: "mb-4 p-4 bg-red-50 text-red-700 rounded-lg border border-red-200 flex items-center gap-2",
+                                    span { "⚠️" }
+                                    "{err}"
+                                }
                             }
-                        }
 
-                        if pins.read().is_empty() {
-                            div { class: "text-gray-500 text-center py-8",
-                                "No pins found"
-                            }
-                        } else {
-                            div { class: "space-y-1",
+                            if pins.read().is_empty() {
+                                div { class: "text-center py-12",
+                                    div { class: "text-4xl mb-4", "📭" }
+                                    p { class: "text-gray-500 text-lg", "No pins found" }
+                                    p { class: "text-gray-400 text-sm mt-1", "Upload some paths to create your first pin" }
+                                }
+                            } else {
                                 TreeNodeView {
                                     node: build_pin_tree(&pins.read()),
                                     path: String::new(),
@@ -288,16 +317,13 @@ fn TreeNodeView(
     let mut sorted_children: Vec<_> = node.children.into_iter().collect();
     sorted_children.sort_by_key(|(_, child)| !child.has_active_pins());
 
-    let indent_class = match depth {
-        0 => "",
-        1 => "ml-4",
-        2 => "ml-8",
-        3 => "ml-12",
-        _ => "ml-16",
-    };
-
     rsx! {
-        div { class: "{indent_class}",
+        div { class: if depth > 0 { "pl-5 relative" } else { "" },
+            // Vertical connector line for nested items
+            if depth > 0 {
+                div { class: "absolute left-2 top-0 bottom-0 w-px bg-gray-200" }
+            }
+
             // Render children (directories)
             for (name, child) in sorted_children.iter() {
                 TreeDirNode {
@@ -316,14 +342,14 @@ fn TreeNodeView(
             if has_pins {
                 // Active pins
                 for pin in active_pins.iter() {
-                    div { class: "border-l-2 border-green-300 my-1",
-                        PinLeaf {
-                            pin: pin.clone(),
-                            server_url: server_url.clone(),
-                            token: token.clone(),
-                            on_abandoned: move |_| {
-                                on_refresh.call(());
-                            }
+                    PinLeaf {
+                        key: "{pin.id}",
+                        pin: pin.clone(),
+                        depth: depth,
+                        server_url: server_url.clone(),
+                        token: token.clone(),
+                        on_abandoned: move |_| {
+                            on_refresh.call(());
                         }
                     }
                 }
@@ -332,26 +358,29 @@ fn TreeNodeView(
                 if !abandoned_pins.is_empty() {
                     if *show_abandoned.read() {
                         for pin in abandoned_pins.iter() {
-                            div { class: "border-l-2 border-gray-300 my-1",
-                                PinLeaf {
-                                    pin: pin.clone(),
-                                    server_url: server_url.clone(),
-                                    token: token.clone(),
-                                    on_abandoned: move |_| {
-                                        on_refresh.call(());
-                                    }
+                            PinLeaf {
+                                key: "{pin.id}",
+                                pin: pin.clone(),
+                                depth: depth,
+                                server_url: server_url.clone(),
+                                token: token.clone(),
+                                on_abandoned: move |_| {
+                                    on_refresh.call(());
                                 }
                             }
                         }
                         button {
-                            class: "text-xs text-gray-400 hover:text-gray-600 px-3 py-1",
+                            class: "flex items-center gap-2 ml-1 text-xs text-gray-400 hover:text-gray-600 py-1.5 transition-colors",
                             onclick: move |_| show_abandoned.set(false),
+                            span { class: "text-gray-300", "└" }
                             "Hide abandoned"
                         }
                     } else {
                         button {
-                            class: "text-xs text-gray-400 hover:text-gray-600 px-3 py-1",
+                            class: "flex items-center gap-2 ml-1 text-xs text-gray-400 hover:text-gray-600 py-1.5 transition-colors",
                             onclick: move |_| show_abandoned.set(true),
+                            span { class: "text-gray-300", "└" }
+                            span { class: "opacity-60", "📦" }
                             "Show {abandoned_pins.len()} abandoned..."
                         }
                     }
@@ -373,25 +402,42 @@ fn TreeDirNode(
 ) -> Element {
     let mut expanded = use_signal(|| true);
 
+    let active_count = child.active_pins();
+    let abandoned_count = child.abandoned_pins();
+    let has_active = active_count > 0;
+
     rsx! {
-        div { class: "border-l-2 border-gray-200 my-1",
+        div { class: "relative",
             // Directory header
             button {
-                class: "w-full flex items-center gap-2 px-3 py-2 text-left hover:bg-gray-50 rounded-r transition-colors",
+                class: "group w-full flex items-center gap-2 py-1.5 text-left rounded-md hover:bg-blue-50 transition-all duration-150",
                 onclick: move |_| {
                     let current = *expanded.read();
                     expanded.set(!current);
                 },
-                span { class: "text-gray-400 text-xs w-4",
-                    if *expanded.read() { "▼" } else { "▶" }
+                // Expand/collapse chevron
+                span { class: "text-gray-400 group-hover:text-blue-500 transition-colors w-4 text-center",
+                    if *expanded.read() { "▾" } else { "▸" }
                 }
-                span { class: "font-medium text-gray-700", "{name}/" }
-                span { class: "text-xs text-gray-400 ml-auto",
-                    if child.active_pins() > 0 {
-                        "{child.active_pins()} active"
+                // Folder icon
+                span { class: "text-base",
+                    if *expanded.read() { "📂" } else { "📁" }
+                }
+                // Directory name
+                span { class: "font-medium text-gray-700 group-hover:text-blue-700 transition-colors",
+                    "{name}"
+                }
+                // Pin counts badge
+                div { class: "flex items-center gap-1.5 ml-auto pr-2",
+                    if has_active {
+                        span { class: "inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-700",
+                            "{active_count}"
+                        }
                     }
-                    if child.abandoned_pins() > 0 {
-                        " +{child.abandoned_pins()} abandoned"
+                    if abandoned_count > 0 {
+                        span { class: "inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-500",
+                            "+{abandoned_count}"
+                        }
                     }
                 }
             }
@@ -414,6 +460,7 @@ fn TreeDirNode(
 #[component]
 fn PinLeaf(
     pin: Pin,
+    depth: usize,
     server_url: String,
     token: String,
     on_abandoned: EventHandler<()>,
@@ -448,93 +495,117 @@ fn PinLeaf(
         }
     };
 
-    let status_class = if pin.abandoned {
-        "bg-red-100 text-red-800"
+    let (status_class, status_icon) = if pin.abandoned {
+        ("bg-red-50 text-red-600 border-red-200", "🗑️")
     } else if pin.expires.is_some() {
-        "bg-yellow-100 text-yellow-800"
+        ("bg-amber-50 text-amber-600 border-amber-200", "⏳")
     } else {
-        "bg-green-100 text-green-800"
+        ("bg-emerald-50 text-emerald-600 border-emerald-200", "✓")
     };
 
-    let status_text = if pin.abandoned {
-        "Abandoned"
-    } else if pin.expires.is_some() {
-        "Expiring"
+    let card_class = if pin.abandoned {
+        "bg-gray-50 border border-gray-200 opacity-60"
     } else {
-        "Active"
+        "bg-white border border-gray-200 shadow-sm hover:shadow-md hover:border-blue-200"
     };
-
-    let bg_class = if pin.abandoned { "bg-gray-50" } else { "bg-white" };
 
     // Get the leaf name (last part of the path)
     let leaf_name = pin.name.split('/').last().unwrap_or(&pin.name);
 
     rsx! {
-        div { class: "{bg_class} rounded-r",
-            // Header row
-            button {
-                class: "w-full flex items-center gap-2 px-3 py-2 text-left hover:bg-gray-50 transition-colors",
-                onclick: move |_| {
-                    let current = *expanded.read();
-                    expanded.set(!current);
-                },
-                span { class: "text-gray-400 text-xs w-4",
-                    if *expanded.read() { "▼" } else { "▶" }
-                }
-                span { class: "font-medium text-gray-800", "{leaf_name}" }
-                span { class: "px-2 py-0.5 text-xs font-medium rounded-full {status_class} ml-2",
-                    "{status_text}"
-                }
-                span { class: "text-xs text-gray-400 ml-auto",
-                    "{pin.roots.len()} roots"
-                }
-                if !is_abandoned {
-                    button {
-                        class: "px-2 py-1 text-xs bg-red-500 text-white rounded hover:bg-red-600 disabled:opacity-50 ml-2",
-                        disabled: *abandoning.read(),
-                        onclick: handle_abandon,
-                        if *abandoning.read() { "..." } else { "Abandon" }
-                    }
-                }
+        div { class: "relative py-1",
+            // Horizontal connector
+            if depth > 0 {
+                div { class: "absolute left-[-12px] top-1/2 w-3 h-px bg-gray-200" }
             }
 
-            // Expanded details
-            if *expanded.read() {
-                div { class: "px-3 py-2 ml-6 text-sm border-t border-gray-100",
-                    if let Some(err) = abandon_error.read().as_ref() {
-                        div { class: "mb-2 p-2 bg-red-100 text-red-700 text-xs rounded",
-                            "{err}"
+            div { class: "{card_class} rounded-lg transition-all duration-150",
+                // Header row
+                button {
+                    class: "w-full flex items-center gap-3 px-4 py-3 text-left",
+                    onclick: move |_| {
+                        let current = *expanded.read();
+                        expanded.set(!current);
+                    },
+                    // Pin icon
+                    span { class: "text-base flex-shrink-0",
+                        if pin.abandoned { "📦" } else { "📌" }
+                    }
+                    // Pin name
+                    div { class: "flex-grow min-w-0",
+                        span { class: "font-medium text-gray-800 block truncate", "{leaf_name}" }
+                        span { class: "text-xs text-gray-400",
+                            "{pin.roots.len()} root"
+                            if pin.roots.len() != 1 { "s" }
                         }
                     }
-
-                    if let Some(desc) = &pin.description {
-                        p { class: "text-gray-500 mb-2", "{desc}" }
+                    // Status badge
+                    span { class: "inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-medium border {status_class} flex-shrink-0",
+                        "{status_icon}"
                     }
-
-                    div { class: "text-xs text-gray-500 space-y-1",
-                        div { "ID: {pin.id}" }
-                        div { "Created: {pin.created}" }
-                        if let Some(expires) = &pin.expires {
-                            div { "Expires: {expires}" }
-                        }
-                        if let Some(leave) = pin.leave_after_abandon {
-                            div { "Leave after abandon: {format_duration(leave)}" }
-                        }
+                    // Expand indicator
+                    span { class: "text-gray-300 text-sm flex-shrink-0 ml-1",
+                        if *expanded.read() { "▾" } else { "▸" }
                     }
+                }
 
-                    if !pin.roots.is_empty() {
-                        div { class: "mt-2",
-                            h4 { class: "text-xs font-medium text-gray-600 mb-1",
-                                "Roots:"
+                // Expanded details
+                if *expanded.read() {
+                    div { class: "px-4 pb-4 pt-2 border-t border-gray-100",
+                        if let Some(err) = abandon_error.read().as_ref() {
+                            div { class: "mb-3 p-3 bg-red-50 text-red-700 text-sm rounded-lg border border-red-200",
+                                "{err}"
                             }
-                            div { class: "space-y-1",
-                                for root in pin.roots.iter() {
-                                    div {
-                                        key: "{root.drv_id}",
-                                        class: "text-xs font-mono bg-gray-100 p-1.5 rounded truncate",
-                                        title: "/nix/store/{root.drv_full}",
-                                        "/nix/store/{root.drv_full}"
+                        }
+
+                        if let Some(desc) = &pin.description {
+                            p { class: "text-gray-600 mb-3 text-sm", "{desc}" }
+                        }
+
+                        // Metadata grid
+                        div { class: "grid grid-cols-2 gap-x-4 gap-y-2 text-sm mb-3",
+                            div { class: "text-gray-400", "ID" }
+                            div { class: "text-gray-700 font-mono text-xs", "{pin.id}" }
+                            div { class: "text-gray-400", "Created" }
+                            div { class: "text-gray-700", "{pin.created}" }
+                            if let Some(expires) = &pin.expires {
+                                div { class: "text-gray-400", "Expires" }
+                                div { class: "text-amber-600", "{expires}" }
+                            }
+                            if let Some(leave) = pin.leave_after_abandon {
+                                div { class: "text-gray-400", "Leave after abandon" }
+                                div { class: "text-gray-700", "{format_duration(leave)}" }
+                            }
+                        }
+
+                        // Roots section
+                        if !pin.roots.is_empty() {
+                            details { class: "group",
+                                summary { class: "cursor-pointer text-sm text-gray-500 hover:text-gray-700 py-1 select-none",
+                                    "📦 {pin.roots.len()} store path"
+                                    if pin.roots.len() != 1 { "s" }
+                                }
+                                div { class: "mt-2 space-y-1.5",
+                                    for root in pin.roots.iter() {
+                                        div {
+                                            key: "{root.drv_id}",
+                                            class: "text-xs font-mono bg-gray-50 p-2 rounded-md border border-gray-100 truncate text-gray-600",
+                                            title: "/nix/store/{root.drv_full}",
+                                            "/nix/store/{root.drv_full}"
+                                        }
                                     }
+                                }
+                            }
+                        }
+
+                        // Abandon button
+                        if !is_abandoned {
+                            div { class: "mt-4 pt-3 border-t border-gray-100",
+                                button {
+                                    class: "px-4 py-2 text-sm bg-red-50 text-red-600 rounded-lg hover:bg-red-100 border border-red-200 transition-colors disabled:opacity-50",
+                                    disabled: *abandoning.read(),
+                                    onclick: handle_abandon,
+                                    if *abandoning.read() { "Abandoning..." } else { "🗑️ Abandon Pin" }
                                 }
                             }
                         }
