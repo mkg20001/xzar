@@ -75,6 +75,8 @@ multer = "3"
 # Async utilities
 futures = "0.3"
 tokio-util = { version = "0.7", features = ["io"] }
+async-trait = "0.1"
+bytes = "1"
 
 # Test harness (optional)
 tempfile = { version = "3", optional = true }

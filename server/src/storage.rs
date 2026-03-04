@@ -1,17 +1,49 @@
 use std::io::Write;
 use std::path::{Path, PathBuf};
+use std::pin::Pin;
+
+use async_trait::async_trait;
+use futures::Stream;
 use tokio::fs::{self, File};
 use tokio::io::{AsyncRead, AsyncWriteExt, BufWriter};
 
 use crate::error::{AppError, Result};
 
-/// File-based storage backend for NAR files
-#[derive(Clone)]
-pub struct Storage {
-    pub base_path: PathBuf,
+/// A boxed async byte stream for reading from storage
+pub type ByteStream = Pin<Box<dyn Stream<Item = std::io::Result<bytes::Bytes>> + Send>>;
+
+/// Abstract storage backend trait
+#[async_trait]
+pub trait StorageBackend: Send + Sync + Clone {
+    /// Write a file from an async reader, computing SHA256 hash while writing.
+    /// Returns (bytes_written, sha256_hash_bytes).
+    /// On failure, the destination file is automatically cleaned up.
+    async fn push_with_hash<R: AsyncRead + Send + Unpin>(
+        &self,
+        filename: &str,
+        reader: R,
+    ) -> Result<(u64, Vec<u8>)>;
+
+    /// Open a file for streamed reading, returns a byte stream
+    async fn pull(&self, filename: &str) -> Result<ByteStream>;
+
+    /// Check if a file exists
+    async fn exists(&self, filename: &str) -> bool;
+
+    /// Delete a file (idempotent - no error if file doesn't exist)
+    async fn delete(&self, filename: &str) -> Result<()>;
+
+    /// Get file size
+    async fn size(&self, filename: &str) -> Result<u64>;
 }
 
-impl Storage {
+/// File-based storage backend for NAR files
+#[derive(Clone)]
+pub struct FileStorage {
+    base_path: PathBuf,
+}
+
+impl FileStorage {
     pub async fn new<P: AsRef<Path>>(base_path: P) -> Result<Self> {
         let path = base_path.as_ref().to_path_buf();
 
@@ -25,27 +57,37 @@ impl Storage {
     fn file_path(&self, filename: &str) -> PathBuf {
         self.base_path.join(filename)
     }
+}
 
-    /// Write a file from an async reader, returning the number of bytes written
-    pub async fn push<R: AsyncRead + Unpin>(
-        &self,
-        filename: &str,
-        mut reader: R,
-    ) -> Result<u64> {
-        let path = self.file_path(filename);
+/// Guard that deletes a file on drop unless disarmed.
+/// Used for cleanup on failed writes.
+struct WriteGuard {
+    path: PathBuf,
+    armed: bool,
+}
 
-        let file = File::create(&path).await?;
-        let mut writer = BufWriter::new(file);
-
-        let bytes_written = tokio::io::copy(&mut reader, &mut writer).await?;
-        writer.flush().await?;
-
-        Ok(bytes_written)
+impl WriteGuard {
+    fn new(path: PathBuf) -> Self {
+        Self { path, armed: true }
     }
 
-    /// Write bytes to a file, computing SHA256 hash while writing
-    /// Returns (bytes_written, sha256_hash_bytes)
-    pub async fn push_with_hash<R: AsyncRead + Unpin>(
+    fn disarm(&mut self) {
+        self.armed = false;
+    }
+}
+
+impl Drop for WriteGuard {
+    fn drop(&mut self) {
+        if self.armed {
+            // Best-effort cleanup - ignore errors
+            let _ = std::fs::remove_file(&self.path);
+        }
+    }
+}
+
+#[async_trait]
+impl StorageBackend for FileStorage {
+    async fn push_with_hash<R: AsyncRead + Send + Unpin>(
         &self,
         filename: &str,
         mut reader: R,
@@ -53,7 +95,13 @@ impl Storage {
         use sha2::{Digest, Sha256};
 
         let path = self.file_path(filename);
+
+        // Create the file
         let file = File::create(&path).await?;
+
+        // Arm the cleanup guard - will delete file if we don't disarm
+        let mut guard = WriteGuard::new(path);
+
         let mut writer = BufWriter::new(file);
         let mut hasher = Sha256::new();
         let mut total_bytes = 0u64;
@@ -73,12 +121,16 @@ impl Storage {
 
         writer.flush().await?;
 
+        // Success - disarm the guard so file is kept
+        guard.disarm();
+
         let hash = hasher.finalize().to_vec();
         Ok((total_bytes, hash))
     }
 
-    /// Open a file for reading
-    pub async fn pull(&self, filename: &str) -> Result<File> {
+    async fn pull(&self, filename: &str) -> Result<ByteStream> {
+        use tokio_util::io::ReaderStream;
+
         let path = self.file_path(filename);
 
         if !path.exists() {
@@ -86,16 +138,16 @@ impl Storage {
         }
 
         let file = File::open(&path).await?;
-        Ok(file)
+        let stream = ReaderStream::new(file);
+
+        Ok(Box::pin(stream))
     }
 
-    /// Check if a file exists
-    pub async fn exists(&self, filename: &str) -> bool {
+    async fn exists(&self, filename: &str) -> bool {
         self.file_path(filename).exists()
     }
 
-    /// Delete a file (idempotent - no error if file doesn't exist)
-    pub async fn delete(&self, filename: &str) -> Result<()> {
+    async fn delete(&self, filename: &str) -> Result<()> {
         let path = self.file_path(filename);
 
         if path.exists() {
@@ -105,8 +157,7 @@ impl Storage {
         Ok(())
     }
 
-    /// Get file size
-    pub async fn size(&self, filename: &str) -> Result<u64> {
+    async fn size(&self, filename: &str) -> Result<u64> {
         let path = self.file_path(filename);
         let metadata = fs::metadata(&path).await?;
         Ok(metadata.len())
@@ -139,3 +190,6 @@ pub fn write_with_hash<W: Write, R: std::io::Read>(
 
     Ok((total_bytes, hasher.finalize().to_vec()))
 }
+
+// Re-export FileStorage as Storage for backwards compatibility
+pub type Storage = FileStorage;

@@ -1,23 +1,23 @@
 use diesel::prelude::*;
-use rocket::fs::NamedFile;
 use rocket::get;
 use rocket::http::ContentType;
+use rocket::response::stream::ByteStream;
 use rocket::State;
 
 use crate::db::Db;
 use crate::error::{AppError, Result};
 use crate::models::Drv;
 use crate::schema::drvs;
-use crate::storage::Storage;
+use crate::storage::{Storage, StorageBackend};
 
 /// GET /nar/{filename}
-/// Returns the NAR file as a binary stream
+/// Returns the NAR file as a streamed binary response
 #[get("/nar/<filename>")]
 pub async fn get_nar(
     filename: &str,
     db: Db,
     storage: &State<Storage>,
-) -> Result<(ContentType, NamedFile)> {
+) -> Result<(ContentType, ByteStream![Vec<u8>])> {
     let mut conn = db.0;
 
     // Find the derivation by nar_file
@@ -44,12 +44,20 @@ pub async fn get_nar(
         _ => ContentType::Binary,
     };
 
-    // Get the file path and serve it
-    let file_path = storage.base_path.join(&drv.nar_file_storage);
+    // Get the byte stream from storage
+    let stream = storage.pull(&drv.nar_file_storage).await?;
 
-    let file = NamedFile::open(&file_path)
-        .await
-        .map_err(|e| AppError::Io(e))?;
+    // Convert to Rocket's ByteStream format
+    use futures::StreamExt;
+    let byte_stream = ByteStream! {
+        let mut stream = stream;
+        while let Some(result) = stream.next().await {
+            match result {
+                Ok(bytes) => yield bytes.to_vec(),
+                Err(_) => break,
+            }
+        }
+    };
 
-    Ok((content_type, file))
+    Ok((content_type, byte_stream))
 }

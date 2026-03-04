@@ -6,7 +6,7 @@ use std::time::Duration;
 use tokio::time::interval;
 
 use crate::schema::{drv_locks, drv_pins, drvs, locks, pins};
-use crate::storage::Storage;
+use crate::storage::{Storage, StorageBackend};
 
 type DbPool = Pool<ConnectionManager<PgConnection>>;
 

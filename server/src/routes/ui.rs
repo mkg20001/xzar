@@ -3,7 +3,7 @@
 //! Serves the embedded xzar-ui files from the binary.
 //!
 //! Enable the `embed-ui` feature to embed the UI:
-//! ```
+//! ```text
 //! cargo build --features embed-ui
 //! ```
 //!
