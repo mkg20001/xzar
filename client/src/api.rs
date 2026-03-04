@@ -6,9 +6,13 @@ use reqwest::multipart::{Form, Part};
 use reqwest::Client;
 use serde::Deserialize;
 use tokio::sync::Mutex;
-use xzar_common::{CheckRequest, CheckResponse, FinalizePinRequest, LockRequest, LockResponse, PinResponse};
+use xzar_common::{
+    AdminTokenResponse, AdminUserResponse, CheckRequest, CheckResponse, CreateTokenRequest,
+    CreateTokenResponse, CreateUserRequest, FinalizePinRequest, LockRequest, LockResponse,
+    PinResponse, UpdateUserRequest,
+};
 
-pub use xzar_common::{PinRoot, format_duration};
+pub use xzar_common::format_duration;
 
 #[derive(Debug, Deserialize)]
 struct ErrorResponse {
@@ -239,7 +243,8 @@ impl ApiClient {
 
     /// List all pins
     pub async fn list_pins(&self) -> Result<Vec<PinResponse>> {
-        let response = self.client
+        let response = self
+            .client
             .get(format!("{}/pins", self.base_url))
             .header("Authorization", format!("Bearer {}", self.key))
             .send()
@@ -247,5 +252,126 @@ impl ApiClient {
             .context("Failed to list pins")?;
 
         self.handle_response(response).await
+    }
+
+    // ============ Admin User API ============
+
+    /// List all users (admin only)
+    pub async fn list_users(&self) -> Result<Vec<AdminUserResponse>> {
+        let response = self
+            .client
+            .get(format!("{}/admin/users", self.base_url))
+            .header("Authorization", format!("Bearer {}", self.key))
+            .send()
+            .await
+            .context("Failed to list users")?;
+
+        self.handle_response(response).await
+    }
+
+    /// Create a new user (admin only)
+    pub async fn create_user(&self, name: &str, is_admin: bool) -> Result<AdminUserResponse> {
+        let request = CreateUserRequest {
+            name: name.to_string(),
+            is_admin,
+        };
+
+        let response = self
+            .client
+            .post(format!("{}/admin/users", self.base_url))
+            .header("Authorization", format!("Bearer {}", self.key))
+            .json(&request)
+            .send()
+            .await
+            .context("Failed to create user")?;
+
+        self.handle_response(response).await
+    }
+
+    /// Update a user (admin only)
+    pub async fn update_user(
+        &self,
+        user_id: i32,
+        is_admin: Option<bool>,
+        email: Option<Option<String>>,
+    ) -> Result<AdminUserResponse> {
+        let request = UpdateUserRequest { is_admin, email };
+
+        let response = self
+            .client
+            .patch(format!("{}/admin/users/{}", self.base_url, user_id))
+            .header("Authorization", format!("Bearer {}", self.key))
+            .json(&request)
+            .send()
+            .await
+            .context("Failed to update user")?;
+
+        self.handle_response(response).await
+    }
+
+    /// Delete a user (admin only)
+    pub async fn delete_user(&self, user_id: i32) -> Result<()> {
+        let response = self
+            .client
+            .delete(format!("{}/admin/users/{}", self.base_url, user_id))
+            .header("Authorization", format!("Bearer {}", self.key))
+            .send()
+            .await
+            .context("Failed to delete user")?;
+
+        let _: bool = self.handle_response(response).await?;
+        Ok(())
+    }
+
+    // ============ Admin Token API ============
+
+    /// List all tokens (admin only)
+    pub async fn list_tokens(&self) -> Result<Vec<AdminTokenResponse>> {
+        let response = self
+            .client
+            .get(format!("{}/admin/tokens", self.base_url))
+            .header("Authorization", format!("Bearer {}", self.key))
+            .send()
+            .await
+            .context("Failed to list tokens")?;
+
+        self.handle_response(response).await
+    }
+
+    /// Create a new token (admin only)
+    pub async fn create_token(
+        &self,
+        user_id: Option<i32>,
+        description: Option<&str>,
+    ) -> Result<CreateTokenResponse> {
+        let request = CreateTokenRequest {
+            user_id,
+            description: description.map(|s| s.to_string()),
+        };
+
+        let response = self
+            .client
+            .post(format!("{}/admin/tokens", self.base_url))
+            .header("Authorization", format!("Bearer {}", self.key))
+            .json(&request)
+            .send()
+            .await
+            .context("Failed to create token")?;
+
+        self.handle_response(response).await
+    }
+
+    /// Delete/revoke a token (admin only)
+    pub async fn delete_token(&self, token_id: i32) -> Result<()> {
+        let response = self
+            .client
+            .delete(format!("{}/admin/tokens/{}", self.base_url, token_id))
+            .header("Authorization", format!("Bearer {}", self.key))
+            .send()
+            .await
+            .context("Failed to delete token")?;
+
+        let _: bool = self.handle_response(response).await?;
+        Ok(())
     }
 }

@@ -10,7 +10,7 @@ use clap::{Parser, Subcommand};
 use indicatif::{ProgressBar, ProgressStyle};
 use tracing_subscriber::EnvFilter;
 
-use crate::api::{ApiClient, format_duration};
+use crate::api::{format_duration, ApiClient};
 use crate::nix::NixStore;
 use crate::upload::UploadManager;
 
@@ -61,6 +61,67 @@ enum Command {
 
     /// List all pins on the server
     List,
+
+    /// User management commands (admin only)
+    User {
+        #[command(subcommand)]
+        action: UserAction,
+    },
+
+    /// Token management commands (admin only)
+    Token {
+        #[command(subcommand)]
+        action: TokenAction,
+    },
+}
+
+#[derive(Subcommand, Debug)]
+enum UserAction {
+    /// Create a new user
+    Create {
+        /// Username
+        name: String,
+        /// Make user an admin
+        #[arg(long)]
+        admin: bool,
+    },
+    /// List all users
+    List,
+    /// Delete a user
+    Delete {
+        /// User ID
+        id: i32,
+    },
+    /// Promote user to admin
+    Promote {
+        /// User ID
+        id: i32,
+    },
+    /// Demote admin to regular user
+    Demote {
+        /// User ID
+        id: i32,
+    },
+}
+
+#[derive(Subcommand, Debug)]
+enum TokenAction {
+    /// Create a new token
+    Create {
+        /// User ID to create token for (omit for system token)
+        #[arg(long)]
+        user: Option<i32>,
+        /// Description for the token
+        #[arg(long)]
+        description: Option<String>,
+    },
+    /// List all tokens
+    List,
+    /// Revoke a token
+    Revoke {
+        /// Token ID
+        id: i32,
+    },
 }
 
 fn parse_duration(s: &str) -> Option<u64> {
@@ -79,10 +140,10 @@ fn parse_duration(s: &str) -> Option<u64> {
     let num: u64 = num_str.parse().ok()?;
 
     let multiplier = match unit {
-        "d" => 24 * 60 * 60 * 1000,        // days
-        "w" => 7 * 24 * 60 * 60 * 1000,    // weeks
-        "m" => 30 * 24 * 60 * 60 * 1000,   // months (30 days)
-        "y" => 365 * 24 * 60 * 60 * 1000,  // years
+        "d" => 24 * 60 * 60 * 1000,      // days
+        "w" => 7 * 24 * 60 * 60 * 1000,  // weeks
+        "m" => 30 * 24 * 60 * 60 * 1000, // months (30 days)
+        "y" => 365 * 24 * 60 * 60 * 1000, // years
         _ => return None,
     };
 
@@ -100,8 +161,12 @@ async fn main() -> Result<()> {
 
     let args = Args::parse();
 
-    let server = args.server.ok_or_else(|| anyhow::anyhow!("--server is required"))?;
-    let key = args.key.ok_or_else(|| anyhow::anyhow!("--key is required"))?;
+    let server = args
+        .server
+        .ok_or_else(|| anyhow::anyhow!("--server is required"))?;
+    let key = args
+        .key
+        .ok_or_else(|| anyhow::anyhow!("--key is required"))?;
 
     // Create API client
     let api = ApiClient::new(&server, &key)?;
@@ -114,10 +179,10 @@ async fn main() -> Result<()> {
             expires,
             leave_after_abandon,
             paths,
-        } => {
-            cmd_upload(api, pin, desc, aggressive, expires, leave_after_abandon, paths).await
-        }
+        } => cmd_upload(api, pin, desc, aggressive, expires, leave_after_abandon, paths).await,
         Command::List => cmd_list(api).await,
+        Command::User { action } => cmd_user(api, action).await,
+        Command::Token { action } => cmd_token(api, action).await,
     }
 }
 
@@ -151,24 +216,24 @@ async fn cmd_upload(
     let leave_after_abandon = leave_after_abandon.as_ref().and_then(|s| parse_duration(s));
 
     // Determine parallelism
-    let parallelism = if aggressive {
-        num_cpus::get()
-    } else {
-        1
-    };
+    let parallelism = if aggressive { num_cpus::get() } else { 1 };
 
     println!("Resolving Nix store closure...");
 
     // Get closure of all paths
     let nix = NixStore::new();
-    let closure = nix.get_closure(&paths).await
+    let closure = nix
+        .get_closure(&paths)
+        .await
         .context("Failed to get Nix store closure")?;
 
     println!("Found {} paths in closure", closure.len());
 
     // Check which paths need to be uploaded
     println!("Checking server for existing paths...");
-    let need = api.check(&closure).await
+    let need = api
+        .check(&closure)
+        .await
         .context("Failed to check paths with server")?;
 
     if need.is_empty() {
@@ -186,16 +251,10 @@ async fn cmd_upload(
         );
 
         // Create upload manager and run uploads
-        let mut manager = UploadManager::new(
-            api.clone(),
-            nix,
-            progress.clone(),
-            parallelism,
-            aggressive,
-        );
+        let mut manager =
+            UploadManager::new(api.clone(), nix, progress.clone(), parallelism, aggressive);
 
-        manager.upload_all(&need).await
-            .context("Upload failed")?;
+        manager.upload_all(&need).await.context("Upload failed")?;
 
         progress.finish_with_message("Upload complete!");
     }
@@ -207,7 +266,9 @@ async fn cmd_upload(
     let roots: Vec<String> = closure
         .iter()
         .filter_map(|p| {
-            PathBuf::from(p).file_name().map(|s| s.to_string_lossy().to_string())
+            PathBuf::from(p)
+                .file_name()
+                .map(|s| s.to_string_lossy().to_string())
         })
         .collect();
 
@@ -221,8 +282,7 @@ async fn cmd_upload(
 }
 
 async fn cmd_list(api: ApiClient) -> Result<()> {
-    let pins = api.list_pins().await
-        .context("Failed to list pins")?;
+    let pins = api.list_pins().await.context("Failed to list pins")?;
 
     if pins.is_empty() {
         println!("No pins found.");
@@ -238,7 +298,13 @@ async fn cmd_list(api: ApiClient) -> Result<()> {
             "active"
         };
 
-        println!("{} ({}) - {} roots [{}]", pin.name, pin.id, pin.roots.len(), status);
+        println!(
+            "{} ({}) - {} roots [{}]",
+            pin.name,
+            pin.id,
+            pin.roots.len(),
+            status
+        );
 
         if let Some(desc) = &pin.description {
             println!("  Description: {}", desc);
@@ -259,6 +325,120 @@ async fn cmd_list(api: ApiClient) -> Result<()> {
         }
 
         println!();
+    }
+
+    Ok(())
+}
+
+async fn cmd_user(api: ApiClient, action: UserAction) -> Result<()> {
+    match action {
+        UserAction::Create { name, admin } => {
+            let user = api
+                .create_user(&name, admin)
+                .await
+                .context("Failed to create user")?;
+
+            println!(
+                "Created user '{}' (id: {}, admin: {})",
+                user.name, user.id, user.is_admin
+            );
+        }
+
+        UserAction::List => {
+            let users = api.list_users().await.context("Failed to list users")?;
+
+            if users.is_empty() {
+                println!("No users found.");
+                return Ok(());
+            }
+
+            println!(
+                "{:<6} {:<30} {:<30} {:<8} {}",
+                "ID", "Name", "Email", "Admin", "Created"
+            );
+            println!("{}", "-".repeat(90));
+
+            for user in users {
+                let email = user.email.as_deref().unwrap_or("-");
+                println!(
+                    "{:<6} {:<30} {:<30} {:<8} {}",
+                    user.id, user.name, email, user.is_admin, user.created
+                );
+            }
+        }
+
+        UserAction::Delete { id } => {
+            api.delete_user(id)
+                .await
+                .context("Failed to delete user")?;
+
+            println!("Deleted user {}", id);
+        }
+
+        UserAction::Promote { id } => {
+            api.update_user(id, Some(true), None)
+                .await
+                .context("Failed to promote user")?;
+
+            println!("Promoted user {} to admin", id);
+        }
+
+        UserAction::Demote { id } => {
+            api.update_user(id, Some(false), None)
+                .await
+                .context("Failed to demote user")?;
+
+            println!("Demoted user {} from admin", id);
+        }
+    }
+
+    Ok(())
+}
+
+async fn cmd_token(api: ApiClient, action: TokenAction) -> Result<()> {
+    match action {
+        TokenAction::Create { user, description } => {
+            let result = api
+                .create_token(user, description.as_deref())
+                .await
+                .context("Failed to create token")?;
+
+            println!("Created token (id: {})", result.id);
+            println!("Token: {}", result.token);
+            println!("\nSave this token - it cannot be recovered!");
+        }
+
+        TokenAction::List => {
+            let tokens = api.list_tokens().await.context("Failed to list tokens")?;
+
+            if tokens.is_empty() {
+                println!("No tokens found.");
+                return Ok(());
+            }
+
+            println!(
+                "{:<6} {:<20} {:<8} {:<20} {}",
+                "ID", "User", "System", "Created", "Description"
+            );
+            println!("{}", "-".repeat(80));
+
+            for token in tokens {
+                let user_name = token.user_name.as_deref().unwrap_or("-");
+                let desc = token.description.as_deref().unwrap_or("");
+                println!(
+                    "{:<6} {:<20} {:<8} {:<20} {}",
+                    token.id, user_name, token.is_system, token.created, desc
+                );
+            }
+        }
+
+        TokenAction::Revoke { id } => {
+            api.delete_token(id)
+                .await
+                .context("Failed to revoke token")?;
+
+            println!("Revoked token {}", id);
+        }
     }
 
     Ok(())
