@@ -203,13 +203,11 @@ async fn cmd_upload(
     // Finalize the pin
     println!("Finalizing pin '{}'...", pin);
 
-    // Get root paths (basenames) - resolve symlinks to get actual store paths
-    let roots: Vec<String> = paths
+    // Get root paths (basenames) - get from closure
+    let roots: Vec<String> = closure
         .iter()
         .filter_map(|p| {
-            // Resolve symlink if it is one, otherwise use the path as-is
-            let resolved = std::fs::canonicalize(p).unwrap_or_else(|_| p.clone());
-            resolved.file_name().map(|s| s.to_string_lossy().to_string())
+            PathBuf::from(p).file_name().map(|s| s.to_string_lossy().to_string())
         })
         .collect();
 
