@@ -10,8 +10,10 @@ cors:
 
 storage: '/storage/cache'
 
-tokens:
-- hashed: ...
+# Tokens are now managed via CLI:
+#   xzar-server user create <username> --admin  # Create admin user
+#   xzar-server token create --system           # Create system token
+#   xzar-server token create --user <username>  # Create user token
 
 # generate a key:
 #  nix-store --generate-binary-cache-key KEY-NAME cache-priv-key.pem cache-pub-key.pem

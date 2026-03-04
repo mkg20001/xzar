@@ -59,9 +59,33 @@ diesel::table! {
     }
 }
 
+diesel::table! {
+    users (id) {
+        id -> Int4,
+        #[max_length = 128]
+        name -> Varchar,
+        is_admin -> Bool,
+        created -> Timestamp,
+    }
+}
+
+diesel::table! {
+    tokens (id) {
+        id -> Int4,
+        user_id -> Nullable<Int4>,
+        #[max_length = 128]
+        token_hash -> Varchar,
+        is_system -> Bool,
+        #[max_length = 256]
+        description -> Nullable<Varchar>,
+        created -> Timestamp,
+    }
+}
+
 diesel::joinable!(drv_locks -> drvs (drv_id));
 diesel::joinable!(drv_locks -> locks (lock_id));
 diesel::joinable!(drv_pins -> drvs (drv_id));
 diesel::joinable!(drv_pins -> pins (pin_id));
+diesel::joinable!(tokens -> users (user_id));
 
-diesel::allow_tables_to_appear_in_same_query!(drvs, drv_locks, drv_pins, locks, pins,);
+diesel::allow_tables_to_appear_in_same_query!(drvs, drv_locks, drv_pins, locks, pins, users, tokens,);

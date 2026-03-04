@@ -5388,6 +5388,7 @@ dependencies = [
  "anyhow",
  "base64",
  "chrono",
+ "clap",
  "data-encoding",
  "diesel",
  "diesel_migrations",

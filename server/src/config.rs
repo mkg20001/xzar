@@ -11,8 +11,6 @@ pub struct Config {
     #[serde(default)]
     pub cors: CorsConfig,
     pub storage: String,
-    #[serde(default)]
-    pub tokens: Vec<TokenConfig>,
     #[serde(rename = "signingKey")]
     pub signing_key: Option<String>,
     #[serde(rename = "signingPubKey")]
@@ -63,29 +61,6 @@ impl Default for CorsConfig {
         Self {
             enabled: false,
             origins: Vec::new(),
-        }
-    }
-}
-
-#[derive(Debug, Deserialize, Clone)]
-#[serde(untagged)]
-pub enum TokenConfig {
-    Hashed { hashed: String },
-    Plain { plain: String },
-}
-
-impl TokenConfig {
-    pub fn get_hash(&self) -> String {
-        use sha2::{Digest, Sha512};
-
-        match self {
-            TokenConfig::Hashed { hashed } => hashed.clone(),
-            TokenConfig::Plain { plain } => {
-                let mut hasher = Sha512::new();
-                hasher.update(plain.as_bytes());
-                let result = hasher.finalize();
-                hex::encode(result)
-            }
         }
     }
 }
@@ -145,24 +120,5 @@ impl Config {
         }
 
         Ok(config)
-    }
-
-    pub fn get_token_hashes(&self) -> Vec<String> {
-        self.tokens.iter().map(|t| t.get_hash()).collect()
-    }
-}
-
-// Add hex encoding for SHA512 hashes
-mod hex {
-    const HEX_CHARS: &[u8; 16] = b"0123456789abcdef";
-
-    pub fn encode(bytes: impl AsRef<[u8]>) -> String {
-        let bytes = bytes.as_ref();
-        let mut hex = String::with_capacity(bytes.len() * 2);
-        for &byte in bytes {
-            hex.push(HEX_CHARS[(byte >> 4) as usize] as char);
-            hex.push(HEX_CHARS[(byte & 0x0f) as usize] as char);
-        }
-        hex
     }
 }

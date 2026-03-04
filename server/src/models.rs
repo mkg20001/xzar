@@ -2,7 +2,7 @@ use chrono::NaiveDateTime;
 use diesel::prelude::*;
 use serde::{Deserialize, Serialize};
 
-use crate::schema::{drv_locks, drv_pins, drvs, locks, pins};
+use crate::schema::{drv_locks, drv_pins, drvs, locks, pins, tokens, users};
 
 // ============ Derivations ============
 
@@ -115,6 +115,82 @@ pub struct DrvLock {
 pub struct DrvPin {
     pub drv_id: String,
     pub pin_id: i32,
+}
+
+// ============ Users ============
+
+#[derive(Debug, Clone, Queryable, Selectable, Serialize)]
+#[diesel(table_name = users)]
+#[diesel(check_for_backend(diesel::pg::Pg))]
+pub struct User {
+    pub id: i32,
+    pub name: String,
+    pub is_admin: bool,
+    pub created: NaiveDateTime,
+}
+
+#[derive(Debug, Clone, Insertable)]
+#[diesel(table_name = users)]
+pub struct NewUser {
+    pub name: String,
+    pub is_admin: bool,
+}
+
+// ============ Tokens ============
+
+#[derive(Debug, Clone, Queryable, Selectable, Serialize)]
+#[diesel(table_name = tokens)]
+#[diesel(check_for_backend(diesel::pg::Pg))]
+pub struct Token {
+    pub id: i32,
+    pub user_id: Option<i32>,
+    pub token_hash: String,
+    pub is_system: bool,
+    pub description: Option<String>,
+    pub created: NaiveDateTime,
+}
+
+#[derive(Debug, Clone, Insertable)]
+#[diesel(table_name = tokens)]
+pub struct NewToken {
+    pub user_id: Option<i32>,
+    pub token_hash: String,
+    pub is_system: bool,
+    pub description: Option<String>,
+}
+
+// ============ Auth Result Types ============
+
+/// Result of token validation - represents the authenticated entity
+#[derive(Debug, Clone)]
+pub enum AuthenticatedEntity {
+    /// System token (admin-level, no associated user)
+    System { token_id: i32 },
+    /// User token with associated user info
+    User { token_id: i32, user: User },
+}
+
+impl AuthenticatedEntity {
+    pub fn is_admin(&self) -> bool {
+        match self {
+            AuthenticatedEntity::System { .. } => true,
+            AuthenticatedEntity::User { user, .. } => user.is_admin,
+        }
+    }
+
+    pub fn user(&self) -> Option<&User> {
+        match self {
+            AuthenticatedEntity::System { .. } => None,
+            AuthenticatedEntity::User { user, .. } => Some(user),
+        }
+    }
+
+    pub fn token_id(&self) -> i32 {
+        match self {
+            AuthenticatedEntity::System { token_id } => *token_id,
+            AuthenticatedEntity::User { token_id, .. } => *token_id,
+        }
+    }
 }
 
 // ============ Request/Response DTOs ============

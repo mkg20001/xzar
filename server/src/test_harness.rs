@@ -5,13 +5,16 @@
 
 use std::sync::atomic::{AtomicU16, Ordering};
 
-use crate::auth::TokenStore;
-use crate::config::{Config, CorsConfig, DbConfig, RocketConfig, TokenConfig};
+use crate::auth::hash_token;
+use crate::config::{Config, CorsConfig, DbConfig, RocketConfig};
 use crate::crypto::NixSigningKey;
 use crate::db::Database;
+use crate::models::NewToken;
+use crate::schema::tokens;
 use crate::storage::Storage;
 
 use base64::prelude::*;
+use diesel::prelude::*;
 use diesel::r2d2::{ConnectionManager, Pool};
 use diesel::PgConnection;
 use ed25519_dalek::SigningKey;
@@ -170,9 +173,6 @@ impl TestServerBuilder {
             },
             cors: CorsConfig::default(),
             storage: storage_path.clone(),
-            tokens: vec![TokenConfig::Hashed {
-                hashed: credentials.token_hash.clone(),
-            }],
             signing_key: Some(credentials.signing_key.clone()),
             signing_pub_key: None,
             external_url: None,
@@ -196,20 +196,39 @@ impl TestServerBuilder {
             crate::db::run_migrations(&mut conn);
         }
 
+        // Create system token in database for testing
+        {
+            let mut conn = pool.get().expect("Failed to get connection for token creation");
+            let token_hash = hash_token(&credentials.upload_token);
+
+            // Delete any existing token with same hash (in case of test reruns)
+            diesel::delete(tokens::table.filter(tokens::token_hash.eq(&token_hash)))
+                .execute(&mut conn)
+                .ok();
+
+            // Insert test token as system token
+            let new_token = NewToken {
+                user_id: None,
+                token_hash,
+                is_system: true,
+                description: Some("Test harness token".to_string()),
+            };
+
+            diesel::insert_into(tokens::table)
+                .values(&new_token)
+                .execute(&mut conn)
+                .expect("Failed to create test token");
+        }
+
         // Initialize storage
         let storage = Storage::new(&storage_path)
             .await
             .expect("Failed to initialize test storage");
 
-        // Initialize token store
-        let token_hashes = config.get_token_hashes();
-        let token_store = TokenStore::new(token_hashes);
-
         // Build rocket instance without starting GC
         let rocket = rocket::build()
             .manage(Database(pool))
             .manage(storage)
-            .manage(token_store)
             .manage(config)
             .mount(
                 "/",
@@ -251,7 +270,10 @@ impl TestServer {
     }
 
     /// Make a GET request with authentication
-    pub fn get_authenticated<'c>(&'c self, uri: &str) -> rocket::local::asynchronous::LocalRequest<'c> {
+    pub fn get_authenticated<'c>(
+        &'c self,
+        uri: &str,
+    ) -> rocket::local::asynchronous::LocalRequest<'c> {
         self.client
             .get(uri.to_owned())
             .header(rocket::http::Header::new(
@@ -261,7 +283,10 @@ impl TestServer {
     }
 
     /// Make a POST request with authentication
-    pub fn post_authenticated<'c>(&'c self, uri: &str) -> rocket::local::asynchronous::LocalRequest<'c> {
+    pub fn post_authenticated<'c>(
+        &'c self,
+        uri: &str,
+    ) -> rocket::local::asynchronous::LocalRequest<'c> {
         self.client
             .post(uri.to_owned())
             .header(rocket::http::Header::new(
@@ -271,7 +296,10 @@ impl TestServer {
     }
 
     /// Make a PUT request with authentication
-    pub fn put_authenticated<'c>(&'c self, uri: &str) -> rocket::local::asynchronous::LocalRequest<'c> {
+    pub fn put_authenticated<'c>(
+        &'c self,
+        uri: &str,
+    ) -> rocket::local::asynchronous::LocalRequest<'c> {
         self.client
             .put(uri.to_owned())
             .header(rocket::http::Header::new(
