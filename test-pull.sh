@@ -1,0 +1,1 @@
+nix-store --store $(mktemp -d) -vvvvvvvv --option narinfo-cache-positive-ttl 0 --option narinfo-cache-negative-ttl 0 --option substituters http://localhost:17788 --option trusted-public-keys localhost-1:YMWG9vU78BEOAwrXtbJ4Ym2/1dbHx5/if5JSghbJkaM= --realise "$@"
