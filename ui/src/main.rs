@@ -1,54 +1,17 @@
 use std::collections::BTreeMap;
 
-use chrono::NaiveDateTime;
 use dioxus::prelude::*;
-use serde::{Deserialize, Serialize};
-use xzar_common::{PinResponse as Pin, format_duration};
+use xzar_common::{
+    format_duration, AdminTokenResponse, AdminUserResponse, CreateTokenResponse,
+    PinResponse as Pin, SelfResponse,
+};
 
 const TAILWIND_CSS: &str = include_str!("../assets/tailwind.css");
 
-// ============ API Types ============
+// ============ Global Signals ============
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct SelfResponse {
-    is_admin: bool,
-    credential_type: String,
-    user: Option<UserInfo>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-struct UserInfo {
-    id: i32,
-    name: String,
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct AdminUserResponse {
-    id: i32,
-    name: String,
-    is_admin: bool,
-    created: NaiveDateTime,
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct AdminTokenResponse {
-    id: i32,
-    user_id: Option<i32>,
-    user_name: Option<String>,
-    is_system: bool,
-    description: Option<String>,
-    created: NaiveDateTime,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct CreateTokenResponse {
-    id: i32,
-    token: String,
-}
+static SERVER_URL: GlobalSignal<String> = Signal::global(|| String::from("http://localhost:17788"));
+static TOKEN: GlobalSignal<String> = Signal::global(|| String::new());
 
 fn main() {
     dioxus::launch(App);
@@ -358,8 +321,6 @@ enum ActiveTab {
 
 #[component]
 fn App() -> Element {
-    let mut server_url = use_signal(|| String::from("http://localhost:17788"));
-    let mut token = use_signal(|| String::new());
     let mut pins = use_signal(|| Vec::<Pin>::new());
     let mut error = use_signal(|| Option::<String>::None);
     let mut loading = use_signal(|| false);
@@ -371,8 +332,11 @@ fn App() -> Element {
         loading.set(true);
         error.set(None);
 
+        let server_url = SERVER_URL.read().clone();
+        let token = TOKEN.read().clone();
+
         // First fetch self info
-        match fetch_self(&server_url.read(), &token.read()).await {
+        match fetch_self(&server_url, &token).await {
             Ok(info) => {
                 self_info.set(Some(info));
             }
@@ -385,7 +349,7 @@ fn App() -> Element {
         }
 
         // Then fetch pins
-        match fetch_pins(&server_url.read(), &token.read()).await {
+        match fetch_pins(&server_url, &token).await {
             Ok(fetched_pins) => {
                 pins.set(fetched_pins);
                 authenticated.set(true);
@@ -403,7 +367,10 @@ fn App() -> Element {
         loading.set(true);
         error.set(None);
 
-        match fetch_pins(&server_url.read(), &token.read()).await {
+        let server_url = SERVER_URL.read().clone();
+        let token = TOKEN.read().clone();
+
+        match fetch_pins(&server_url, &token).await {
             Ok(fetched_pins) => {
                 pins.set(fetched_pins);
             }
@@ -451,8 +418,8 @@ fn App() -> Element {
                                         class: "w-full px-4 py-3 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-shadow",
                                         r#type: "text",
                                         placeholder: "http://localhost:17788",
-                                        value: "{server_url}",
-                                        oninput: move |e| server_url.set(e.value())
+                                        value: "{SERVER_URL}",
+                                        oninput: move |e| *SERVER_URL.write() = e.value()
                                     }
                                 }
 
@@ -464,8 +431,8 @@ fn App() -> Element {
                                         class: "w-full px-4 py-3 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-shadow",
                                         r#type: "password",
                                         placeholder: "Enter your upload token",
-                                        value: "{token}",
-                                        oninput: move |e| token.set(e.value())
+                                        value: "{TOKEN}",
+                                        oninput: move |e| *TOKEN.write() = e.value()
                                     }
                                 }
 
@@ -564,10 +531,10 @@ fn App() -> Element {
                                             node: build_pin_tree(&pins.read()),
                                             path: String::new(),
                                             depth: 0,
-                                            server_url: server_url.read().clone(),
-                                            token: token.read().clone(),
                                             on_refresh: move |_| async move {
-                                                if let Ok(fetched_pins) = fetch_pins(&server_url.read(), &token.read()).await {
+                                                let server_url = SERVER_URL.read().clone();
+                                                let token = TOKEN.read().clone();
+                                                if let Ok(fetched_pins) = fetch_pins(&server_url, &token).await {
                                                     pins.set(fetched_pins);
                                                 }
                                             }
@@ -575,10 +542,7 @@ fn App() -> Element {
                                     }
                                 },
                                 ActiveTab::Admin => rsx! {
-                                    AdminPanel {
-                                        server_url: server_url.read().clone(),
-                                        token: token.read().clone()
-                                    }
+                                    AdminPanel {}
                                 }
                             }
                         }
@@ -594,8 +558,6 @@ fn TreeNodeView(
     node: PinTreeNode,
     path: String,
     depth: usize,
-    server_url: String,
-    token: String,
     on_refresh: EventHandler<()>,
 ) -> Element {
     let mut show_abandoned = use_signal(|| false);
@@ -624,8 +586,6 @@ fn TreeNodeView(
                     child: child.clone(),
                     path: path.clone(),
                     depth: depth,
-                    server_url: server_url.clone(),
-                    token: token.clone(),
                     on_refresh: on_refresh.clone()
                 }
             }
@@ -638,8 +598,6 @@ fn TreeNodeView(
                         key: "{pin.id}",
                         pin: pin.clone(),
                         depth: depth,
-                        server_url: server_url.clone(),
-                        token: token.clone(),
                         on_abandoned: move |_| {
                             on_refresh.call(());
                         }
@@ -654,8 +612,6 @@ fn TreeNodeView(
                                 key: "{pin.id}",
                                 pin: pin.clone(),
                                 depth: depth,
-                                server_url: server_url.clone(),
-                                token: token.clone(),
                                 on_abandoned: move |_| {
                                     on_refresh.call(());
                                 }
@@ -688,8 +644,6 @@ fn TreeDirNode(
     child: PinTreeNode,
     path: String,
     depth: usize,
-    server_url: String,
-    token: String,
     on_refresh: EventHandler<()>,
 ) -> Element {
     let mut expanded = use_signal(|| true);
@@ -740,8 +694,6 @@ fn TreeDirNode(
                     node: child.clone(),
                     path: if path.is_empty() { name.clone() } else { format!("{}/{}", path, name) },
                     depth: depth + 1,
-                    server_url: server_url.clone(),
-                    token: token.clone(),
                     on_refresh: on_refresh.clone()
                 }
             }
@@ -753,8 +705,6 @@ fn TreeDirNode(
 fn PinLeaf(
     pin: Pin,
     depth: usize,
-    server_url: String,
-    token: String,
     on_abandoned: EventHandler<()>,
 ) -> Element {
     let mut expanded = use_signal(|| false);
@@ -763,16 +713,15 @@ fn PinLeaf(
 
     let pin_id = pin.id;
     let is_abandoned = pin.abandoned;
-    let server_url_clone = server_url.clone();
-    let token_clone = token.clone();
 
     let handle_abandon = move |e: Event<MouseData>| {
         e.stop_propagation();
-        let server_url = server_url_clone.clone();
-        let token = token_clone.clone();
         async move {
             abandoning.set(true);
             abandon_error.set(None);
+
+            let server_url = SERVER_URL.read().clone();
+            let token = TOKEN.read().clone();
 
             match abandon_pin(&server_url, &token, pin_id).await {
                 Ok(()) => {
@@ -917,7 +866,7 @@ enum AdminTab {
 }
 
 #[component]
-fn AdminPanel(server_url: String, token: String) -> Element {
+fn AdminPanel() -> Element {
     let mut admin_tab = use_signal(|| AdminTab::Users);
     let mut users = use_signal(|| Vec::<AdminUserResponse>::new());
     let mut tokens_list = use_signal(|| Vec::<AdminTokenResponse>::new());
@@ -925,13 +874,11 @@ fn AdminPanel(server_url: String, token: String) -> Element {
     let error = use_signal(|| Option::<String>::None);
 
     // Load data on mount
-    let server_url_clone = server_url.clone();
-    let token_clone = token.clone();
     use_effect(move || {
-        let server_url = server_url_clone.clone();
-        let token = token_clone.clone();
         spawn(async move {
             loading.set(true);
+            let server_url = SERVER_URL.read().clone();
+            let token = TOKEN.read().clone();
             if let Ok(u) = fetch_users(&server_url, &token).await {
                 users.set(u);
             }
@@ -980,13 +927,11 @@ fn AdminPanel(server_url: String, token: String) -> Element {
                 match *admin_tab.read() {
                     AdminTab::Users => rsx! {
                         UsersPanel {
-                            server_url: server_url.clone(),
-                            token: token.clone(),
                             users: users.read().clone(),
                             on_refresh: move |_| {
-                                let server_url = server_url.clone();
-                                let token = token.clone();
                                 spawn(async move {
+                                    let server_url = SERVER_URL.read().clone();
+                                    let token = TOKEN.read().clone();
                                     if let Ok(u) = fetch_users(&server_url, &token).await {
                                         users.set(u);
                                     }
@@ -996,14 +941,12 @@ fn AdminPanel(server_url: String, token: String) -> Element {
                     },
                     AdminTab::Tokens => rsx! {
                         TokensPanel {
-                            server_url: server_url.clone(),
-                            token: token.clone(),
                             tokens: tokens_list.read().clone(),
                             users: users.read().clone(),
                             on_refresh: move |_| {
-                                let server_url = server_url.clone();
-                                let token = token.clone();
                                 spawn(async move {
+                                    let server_url = SERVER_URL.read().clone();
+                                    let token = TOKEN.read().clone();
                                     if let Ok(t) = fetch_tokens(&server_url, &token).await {
                                         tokens_list.set(t);
                                     }
@@ -1019,8 +962,6 @@ fn AdminPanel(server_url: String, token: String) -> Element {
 
 #[component]
 fn UsersPanel(
-    server_url: String,
-    token: String,
     users: Vec<AdminUserResponse>,
     on_refresh: EventHandler<()>,
 ) -> Element {
@@ -1030,16 +971,15 @@ fn UsersPanel(
     let mut creating = use_signal(|| false);
     let mut create_error = use_signal(|| Option::<String>::None);
 
-    let server_url_create = server_url.clone();
-    let token_create = token.clone();
     let handle_create = move |_| {
-        let server_url = server_url_create.clone();
-        let token = token_create.clone();
         let name = new_name.read().clone();
         let is_admin = *new_is_admin.read();
         async move {
             creating.set(true);
             create_error.set(None);
+
+            let server_url = SERVER_URL.read().clone();
+            let token = TOKEN.read().clone();
 
             match create_user(&server_url, &token, &name, is_admin).await {
                 Ok(_) => {
@@ -1129,8 +1069,6 @@ fn UsersPanel(
                                 UserRow {
                                     key: "{user.id}",
                                     user: user.clone(),
-                                    server_url: server_url.clone(),
-                                    token: token.clone(),
                                     on_refresh: on_refresh.clone()
                                 }
                             }
@@ -1145,8 +1083,6 @@ fn UsersPanel(
 #[component]
 fn UserRow(
     user: AdminUserResponse,
-    server_url: String,
-    token: String,
     on_refresh: EventHandler<()>,
 ) -> Element {
     let mut deleting = use_signal(|| false);
@@ -1155,13 +1091,11 @@ fn UserRow(
     let user_id = user.id;
     let is_admin = user.is_admin;
 
-    let server_url_toggle = server_url.clone();
-    let token_toggle = token.clone();
     let handle_toggle = move |_| {
-        let server_url = server_url_toggle.clone();
-        let token = token_toggle.clone();
         async move {
             toggling.set(true);
+            let server_url = SERVER_URL.read().clone();
+            let token = TOKEN.read().clone();
             if update_user(&server_url, &token, user_id, !is_admin).await.is_ok() {
                 on_refresh.call(());
             }
@@ -1169,13 +1103,11 @@ fn UserRow(
         }
     };
 
-    let server_url_delete = server_url.clone();
-    let token_delete = token.clone();
     let handle_delete = move |_| {
-        let server_url = server_url_delete.clone();
-        let token = token_delete.clone();
         async move {
             deleting.set(true);
+            let server_url = SERVER_URL.read().clone();
+            let token = TOKEN.read().clone();
             if delete_user(&server_url, &token, user_id).await.is_ok() {
                 on_refresh.call(());
             }
@@ -1217,8 +1149,6 @@ fn UserRow(
 
 #[component]
 fn TokensPanel(
-    server_url: String,
-    token: String,
     tokens: Vec<AdminTokenResponse>,
     users: Vec<AdminUserResponse>,
     on_refresh: EventHandler<()>,
@@ -1230,11 +1160,7 @@ fn TokensPanel(
     let mut create_error = use_signal(|| Option::<String>::None);
     let mut created_token = use_signal(|| Option::<String>::None);
 
-    let server_url_create = server_url.clone();
-    let token_create = token.clone();
     let handle_create = move |_| {
-        let server_url = server_url_create.clone();
-        let token = token_create.clone();
         let user_id = *new_user_id.read();
         let desc = if new_description.read().is_empty() {
             None
@@ -1244,6 +1170,9 @@ fn TokensPanel(
         async move {
             creating.set(true);
             create_error.set(None);
+
+            let server_url = SERVER_URL.read().clone();
+            let token = TOKEN.read().clone();
 
             match create_token(&server_url, &token, user_id, desc.as_deref()).await {
                 Ok(resp) => {
@@ -1365,8 +1294,6 @@ fn TokensPanel(
                                 TokenRow {
                                     key: "{t.id}",
                                     token_item: t.clone(),
-                                    server_url: server_url.clone(),
-                                    auth_token: token.clone(),
                                     on_refresh: on_refresh.clone()
                                 }
                             }
@@ -1381,8 +1308,6 @@ fn TokensPanel(
 #[component]
 fn TokenRow(
     token_item: AdminTokenResponse,
-    server_url: String,
-    auth_token: String,
     on_refresh: EventHandler<()>,
 ) -> Element {
     let mut editing = use_signal(|| false);
@@ -1392,11 +1317,7 @@ fn TokenRow(
 
     let token_id = token_item.id;
 
-    let server_url_save = server_url.clone();
-    let auth_token_save = auth_token.clone();
     let handle_save = move |_| {
-        let server_url = server_url_save.clone();
-        let auth_token = auth_token_save.clone();
         async move {
             saving.set(true);
             let desc = if edit_desc.read().is_empty() {
@@ -1404,6 +1325,8 @@ fn TokenRow(
             } else {
                 Some(edit_desc.read().clone())
             };
+            let server_url = SERVER_URL.read().clone();
+            let auth_token = TOKEN.read().clone();
             if update_token(&server_url, &auth_token, token_id, desc.as_deref()).await.is_ok() {
                 editing.set(false);
                 on_refresh.call(());
@@ -1412,13 +1335,11 @@ fn TokenRow(
         }
     };
 
-    let server_url_delete = server_url.clone();
-    let auth_token_delete = auth_token.clone();
     let handle_delete = move |_| {
-        let server_url = server_url_delete.clone();
-        let auth_token = auth_token_delete.clone();
         async move {
             deleting.set(true);
+            let server_url = SERVER_URL.read().clone();
+            let auth_token = TOKEN.read().clone();
             if delete_token(&server_url, &auth_token, token_id).await.is_ok() {
                 on_refresh.call(());
             }

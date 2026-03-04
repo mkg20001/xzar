@@ -91,6 +91,88 @@ pub struct LockRequest {
     pub lock: i32,
 }
 
+// ============ Self/Auth Info Types ============
+
+/// Response from /self endpoint
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SelfResponse {
+    pub is_admin: bool,
+    pub credential_type: String,
+    pub user: Option<UserInfo>,
+}
+
+/// User info in self response
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct UserInfo {
+    pub id: i32,
+    pub name: String,
+}
+
+// ============ Admin API Types ============
+
+/// User response from admin API
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AdminUserResponse {
+    pub id: i32,
+    pub name: String,
+    pub is_admin: bool,
+    pub created: String,
+}
+
+/// Token response from admin API
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AdminTokenResponse {
+    pub id: i32,
+    pub user_id: Option<i32>,
+    pub user_name: Option<String>,
+    pub is_system: bool,
+    pub description: Option<String>,
+    pub created: String,
+}
+
+/// Request to create a user
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CreateUserRequest {
+    pub name: String,
+    #[serde(default)]
+    pub is_admin: bool,
+}
+
+/// Request to update a user
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UpdateUserRequest {
+    pub is_admin: bool,
+}
+
+/// Request to create a token
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CreateTokenRequest {
+    pub user_id: Option<i32>,
+    #[serde(default)]
+    pub description: Option<String>,
+}
+
+/// Response after creating a token (includes raw token)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CreateTokenResponse {
+    pub id: i32,
+    pub token: String,
+}
+
+/// Request to update a token
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UpdateTokenRequest {
+    pub description: Option<String>,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

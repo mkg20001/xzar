@@ -18,6 +18,9 @@ default = []
 test_harness = ["dep:tempfile"]
 
 [dependencies]
+# Common types
+xzar-common = { path = "../common" }
+
 # Web framework
 rocket = { version = "0.5", features = ["json"] }
 rocket_cors = "0.6"

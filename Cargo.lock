@@ -5414,6 +5414,7 @@ dependencies = [
  "tokio-util",
  "tracing",
  "tracing-subscriber",
+ "xzar-common",
 ]
 
 [[package]]

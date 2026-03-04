@@ -31,7 +31,7 @@ pub fn list_users(_admin: AdminUser, db: Db) -> Result<Json<Vec<AdminUserRespons
             id: u.id,
             name: u.name,
             is_admin: u.is_admin,
-            created: u.created,
+            created: u.created.to_string(),
         })
         .collect();
 
@@ -68,7 +68,7 @@ pub fn create_user(
         id: user.id,
         name: user.name,
         is_admin: user.is_admin,
-        created: user.created,
+        created: user.created.to_string(),
     }))
 }
 
@@ -97,7 +97,7 @@ pub fn update_user(
         id: user.id,
         name: user.name,
         is_admin: user.is_admin,
-        created: user.created,
+        created: user.created.to_string(),
     }))
 }
 
@@ -138,7 +138,7 @@ pub fn list_tokens(_admin: AdminUser, db: Db) -> Result<Json<Vec<AdminTokenRespo
             user_name: user.map(|u| u.name),
             is_system: token.is_system,
             description: token.description,
-            created: token.created,
+            created: token.created.to_string(),
         })
         .collect();
 
@@ -229,7 +229,7 @@ pub fn update_token(
         user_name: user.map(|u| u.name),
         is_system: token.is_system,
         description: token.description,
-        created: token.created,
+        created: token.created.to_string(),
     }))
 }
 
