@@ -400,7 +400,7 @@ async fn run_server(
         let cors = CorsOptions::default()
             .allowed_origins(allowed_origins)
             .allowed_methods(
-                vec![Method::Get, Method::Post, Method::Delete, Method::Options]
+                vec![Method::Get, Method::Post, Method::Put, Method::Delete, Method::Options]
                     .into_iter()
                     .map(From::from)
                     .collect(),
