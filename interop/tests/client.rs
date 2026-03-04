@@ -123,9 +123,6 @@ impl TestServerProcess {
         let storage_dir = TempDir::new().expect("Failed to create temp storage dir");
         let config_dir = TempDir::new().expect("Failed to create temp config dir");
 
-        // Generate upload token
-        let upload_token = format!("test-token-{}", rand::random::<u64>());
-
         // Generate a signing key (32 bytes, base64 encoded)
         let signing_secret: [u8; 32] = rand::random();
         let key_name = "test-cache".to_string();
@@ -135,7 +132,7 @@ impl TestServerProcess {
         );
         let signing_key = format!("{}:{}", key_name, signing_key_b64);
 
-        // Create config file
+        // Create config file (tokens are now in database, not config)
         let config_path = config_dir.path().join("config.yaml");
         let database_url = std::env::var("DATABASE_URL")
             .or_else(|_| std::env::var("TEST_DATABASE_URL"))
@@ -145,8 +142,6 @@ impl TestServerProcess {
             r#"storage: "{}"
 db:
   connection: "{}"
-tokens:
-  - plain: "{}"
 signingKey: "{}"
 rocket:
   host: "127.0.0.1"
@@ -154,7 +149,6 @@ rocket:
 "#,
             storage_dir.path().display(),
             database_url,
-            upload_token,
             signing_key,
             port
         );
@@ -163,9 +157,34 @@ rocket:
 
         eprintln!("Starting server on port {} with config:\n{}", port, config_content);
 
+        // Create a system token in the database using the CLI
+        let token_output = Command::new(server_binary())
+            .args(["token", "create", "--system", "--description", "Integration test token"])
+            .env("XZAR_CONFIG", config_path.to_str().unwrap())
+            .output()
+            .expect("Failed to create test token");
+
+        if !token_output.status.success() {
+            panic!(
+                "Failed to create token: {}",
+                String::from_utf8_lossy(&token_output.stderr)
+            );
+        }
+
+        // Parse the token from output (format: "Token: <token>")
+        let token_stdout = String::from_utf8_lossy(&token_output.stdout);
+        let upload_token = token_stdout
+            .lines()
+            .find(|line| line.starts_with("Token: "))
+            .map(|line| line.strip_prefix("Token: ").unwrap().trim().to_string())
+            .expect("Could not find token in CLI output");
+
+        eprintln!("Created test token: {}", upload_token);
+
         // Start server process
         // Rocket needs its own env vars for port/address
         let process = Command::new(server_binary())
+            .args(["serve"])
             .env("XZAR_CONFIG", config_path.to_str().unwrap())
             .env("ROCKET_ADDRESS", "127.0.0.1")
             .env("ROCKET_PORT", port.to_string())
