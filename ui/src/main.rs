@@ -1,5 +1,8 @@
+mod common;
+
 use std::collections::BTreeMap;
 
+use common::InlineEdit;
 use dioxus::prelude::*;
 use xzar_common::{
     format_duration, AdminTokenResponse, AdminUserResponse, CreateTokenResponse,
@@ -202,6 +205,25 @@ async fn update_user(server_url: &str, token: &str, user_id: i32, is_admin: bool
         .put(&url)
         .header("Authorization", format!("Bearer {}", token))
         .json(&serde_json::json!({ "isAdmin": is_admin }))
+        .send()
+        .await
+        .map_err(|e| format!("Request failed: {}", e))?;
+
+    if !response.status().is_success() {
+        return Err(format!("Server error: {}", response.status()));
+    }
+
+    Ok(())
+}
+
+async fn update_user_email(server_url: &str, token: &str, user_id: i32, email: Option<&str>) -> Result<(), String> {
+    let client = reqwest::Client::new();
+    let url = format!("{}/admin/users/{}/email", server_url.trim_end_matches('/'), user_id);
+
+    let response = client
+        .put(&url)
+        .header("Authorization", format!("Bearer {}", token))
+        .json(&serde_json::json!({ "email": email }))
         .send()
         .await
         .map_err(|e| format!("Request failed: {}", e))?;
@@ -1059,6 +1081,7 @@ fn UsersPanel(
                             tr {
                                 th { class: "px-4 py-3 text-left text-gray-600 font-medium", "ID" }
                                 th { class: "px-4 py-3 text-left text-gray-600 font-medium", "Name" }
+                                th { class: "px-4 py-3 text-left text-gray-600 font-medium", "Email" }
                                 th { class: "px-4 py-3 text-left text-gray-600 font-medium", "Admin" }
                                 th { class: "px-4 py-3 text-left text-gray-600 font-medium", "Created" }
                                 th { class: "px-4 py-3 text-left text-gray-600 font-medium", "Actions" }
@@ -1119,6 +1142,21 @@ fn UserRow(
         tr { class: "border-t border-gray-100 hover:bg-gray-50",
             td { class: "px-4 py-3 text-gray-500 font-mono text-xs", "{user.id}" }
             td { class: "px-4 py-3 font-medium text-gray-800", "{user.name}" }
+            td { class: "px-4 py-3",
+                InlineEdit {
+                    value: user.email.clone(),
+                    placeholder: "-",
+                    on_save: move |new_email: Option<String>| {
+                        spawn(async move {
+                            let server_url = SERVER_URL.read().clone();
+                            let token = TOKEN.read().clone();
+                            if update_user_email(&server_url, &token, user_id, new_email.as_deref()).await.is_ok() {
+                                on_refresh.call(());
+                            }
+                        });
+                    }
+                }
+            }
             td { class: "px-4 py-3",
                 if user.is_admin {
                     span { class: "px-2 py-1 text-xs font-medium bg-purple-100 text-purple-700 rounded", "Admin" }
@@ -1310,30 +1348,9 @@ fn TokenRow(
     token_item: AdminTokenResponse,
     on_refresh: EventHandler<()>,
 ) -> Element {
-    let mut editing = use_signal(|| false);
-    let mut edit_desc = use_signal(|| token_item.description.clone().unwrap_or_default());
-    let mut saving = use_signal(|| false);
     let mut deleting = use_signal(|| false);
 
     let token_id = token_item.id;
-
-    let handle_save = move |_| {
-        async move {
-            saving.set(true);
-            let desc = if edit_desc.read().is_empty() {
-                None
-            } else {
-                Some(edit_desc.read().clone())
-            };
-            let server_url = SERVER_URL.read().clone();
-            let auth_token = TOKEN.read().clone();
-            if update_token(&server_url, &auth_token, token_id, desc.as_deref()).await.is_ok() {
-                editing.set(false);
-                on_refresh.call(());
-            }
-            saving.set(false);
-        }
-    };
 
     let handle_delete = move |_| {
         async move {
@@ -1365,52 +1382,27 @@ fn TokenRow(
                 }
             }
             td { class: "px-4 py-3",
-                if *editing.read() {
-                    div { class: "flex gap-2",
-                        input {
-                            class: "flex-1 px-2 py-1 text-sm border border-gray-200 rounded focus:outline-none focus:ring-2 focus:ring-blue-500",
-                            r#type: "text",
-                            value: "{edit_desc}",
-                            oninput: move |e| edit_desc.set(e.value())
-                        }
-                        button {
-                            class: "px-2 py-1 text-xs bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-50",
-                            disabled: *saving.read(),
-                            onclick: handle_save,
-                            "Save"
-                        }
-                        button {
-                            class: "px-2 py-1 text-xs bg-gray-100 text-gray-700 rounded hover:bg-gray-200",
-                            onclick: move |_| editing.set(false),
-                            "Cancel"
-                        }
-                    }
-                } else {
-                    span { class: "text-gray-600 text-sm",
-                        if let Some(desc) = &token_item.description {
-                            "{desc}"
-                        } else {
-                            "-"
-                        }
+                InlineEdit {
+                    value: token_item.description.clone(),
+                    placeholder: "-",
+                    on_save: move |new_desc: Option<String>| {
+                        spawn(async move {
+                            let server_url = SERVER_URL.read().clone();
+                            let auth_token = TOKEN.read().clone();
+                            if update_token(&server_url, &auth_token, token_id, new_desc.as_deref()).await.is_ok() {
+                                on_refresh.call(());
+                            }
+                        });
                     }
                 }
             }
             td { class: "px-4 py-3 text-gray-500 text-xs", "{token_item.created}" }
             td { class: "px-4 py-3",
-                if !*editing.read() {
-                    div { class: "flex gap-2",
-                        button {
-                            class: "px-3 py-1 text-xs bg-gray-100 text-gray-700 rounded hover:bg-gray-200",
-                            onclick: move |_| editing.set(true),
-                            "Edit"
-                        }
-                        button {
-                            class: "px-3 py-1 text-xs bg-red-50 text-red-600 rounded hover:bg-red-100 disabled:opacity-50",
-                            disabled: *deleting.read(),
-                            onclick: handle_delete,
-                            "Delete"
-                        }
-                    }
+                button {
+                    class: "px-3 py-1 text-xs bg-red-50 text-red-600 rounded hover:bg-red-100 disabled:opacity-50",
+                    disabled: *deleting.read(),
+                    onclick: handle_delete,
+                    "Delete"
                 }
             }
         }

@@ -127,6 +127,7 @@ pub struct User {
     pub name: String,
     pub is_admin: bool,
     pub created: NaiveDateTime,
+    pub email: Option<String>,
 }
 
 #[derive(Debug, Clone, Insertable)]
@@ -263,5 +264,6 @@ pub struct PinRoot {
 // Re-export admin API types from common
 pub use xzar_common::{
     AdminTokenResponse, AdminUserResponse, CreateTokenRequest, CreateTokenResponse,
-    CreateUserRequest, SelfResponse, UpdateTokenRequest, UpdateUserRequest, UserInfo,
+    CreateUserRequest, SelfResponse, UpdateTokenRequest, UpdateUserEmailRequest,
+    UpdateUserRequest, UserInfo,
 };

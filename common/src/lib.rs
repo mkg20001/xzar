@@ -117,6 +117,7 @@ pub struct UserInfo {
 pub struct AdminUserResponse {
     pub id: i32,
     pub name: String,
+    pub email: Option<String>,
     pub is_admin: bool,
     pub created: String,
 }
@@ -142,11 +143,18 @@ pub struct CreateUserRequest {
     pub is_admin: bool,
 }
 
-/// Request to update a user
+/// Request to update a user's admin status
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct UpdateUserRequest {
     pub is_admin: bool,
+}
+
+/// Request to update a user's email
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UpdateUserEmailRequest {
+    pub email: Option<String>,
 }
 
 /// Request to create a token

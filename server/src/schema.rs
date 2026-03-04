@@ -66,6 +66,8 @@ diesel::table! {
         name -> Varchar,
         is_admin -> Bool,
         created -> Timestamp,
+        #[max_length = 256]
+        email -> Nullable<Varchar>,
     }
 }
 

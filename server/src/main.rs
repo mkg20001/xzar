@@ -445,6 +445,7 @@ async fn run_server(
                 routes::list_users,
                 routes::create_user,
                 routes::update_user,
+                routes::update_user_email,
                 routes::delete_user,
                 routes::list_tokens,
                 routes::create_token,
