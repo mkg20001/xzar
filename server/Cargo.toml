@@ -16,6 +16,7 @@ path = "src/main.rs"
 [features]
 default = []
 test_harness = ["dep:tempfile"]
+embed-ui = ["dep:rust-embed"]
 
 [dependencies]
 # Common types
@@ -77,6 +78,9 @@ tokio-util = { version = "0.7", features = ["io"] }
 
 # Test harness (optional)
 tempfile = { version = "3", optional = true }
+
+# UI embedding (optional)
+rust-embed = { version = "8", optional = true, features = ["interpolate-folder-path"] }
 
 [dev-dependencies]
 tempfile = "3"
