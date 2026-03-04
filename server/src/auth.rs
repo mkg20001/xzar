@@ -93,17 +93,25 @@ impl<'r> FromRequest<'r> for AuthenticatedUser {
     async fn from_request(request: &'r rocket::Request<'_>) -> Outcome<Self, Self::Error> {
         let database = request.rocket().state::<Database>();
 
+        // Try Authorization header first, then fall back to cookie
         let token = request
             .headers()
             .get_one("Authorization")
-            .and_then(|h| h.strip_prefix("Bearer "));
+            .and_then(|h| h.strip_prefix("Bearer "))
+            .map(|s| s.to_string())
+            .or_else(|| {
+                request
+                    .cookies()
+                    .get("xzar_token")
+                    .map(|c| c.value().to_string())
+            });
 
         match (database, token) {
             (Some(db), Some(raw_token)) => {
                 // Try to get a database connection
                 match db.get() {
                     Ok(mut conn) => {
-                        if let Some(entity) = validate_token(&mut conn, raw_token) {
+                        if let Some(entity) = validate_token(&mut conn, &raw_token) {
                             Outcome::Success(AuthenticatedUser { entity })
                         } else {
                             Outcome::Error((Status::Unauthorized, ()))

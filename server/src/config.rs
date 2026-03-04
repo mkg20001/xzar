@@ -19,6 +19,9 @@ pub struct Config {
     pub external_url: Option<String>,
     pub db: DbConfig,
     pub sentry_dsn: Option<String>,
+    /// OpenID Connect providers configuration
+    #[serde(default)]
+    pub oidc: Vec<OidcProviderConfig>,
 }
 
 #[derive(Debug, Deserialize, Clone)]
@@ -74,6 +77,77 @@ pub struct DbConfig {
 
 fn default_client() -> String {
     "pg".to_string()
+}
+
+/// Configuration for a single OpenID Connect provider
+#[derive(Debug, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct OidcProviderConfig {
+    /// Unique identifier for this provider (used in URLs and database)
+    pub id: String,
+    /// Display name for the provider (shown in UI)
+    pub name: String,
+    /// OpenID Connect discovery URL (e.g., https://accounts.google.com)
+    pub issuer_url: String,
+    /// OAuth2 client ID
+    pub client_id: String,
+    /// OAuth2 client secret
+    pub client_secret: String,
+    /// OAuth2 scopes to request (default: ["openid", "email", "profile"])
+    #[serde(default = "default_scopes")]
+    pub scopes: Vec<String>,
+    /// Field mapping configuration
+    #[serde(default)]
+    pub mapping: OidcFieldMapping,
+    /// Whether to automatically create users if they don't exist
+    #[serde(default)]
+    pub auto_create_user: bool,
+    /// Whether newly created users should be admins (default: false)
+    #[serde(default)]
+    pub new_users_admin: bool,
+}
+
+fn default_scopes() -> Vec<String> {
+    vec!["openid".to_string(), "email".to_string(), "profile".to_string()]
+}
+
+/// Configuration for mapping OIDC claims to user fields
+#[derive(Debug, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct OidcFieldMapping {
+    /// Claim to use for identifying the user (default: "sub")
+    /// This is the unique identifier from the OIDC provider
+    #[serde(default = "default_subject_claim")]
+    pub subject_claim: String,
+    /// Claim to use for the user's name (default: "preferred_username")
+    /// Falls back to: name, email (local part), sub
+    #[serde(default = "default_name_claim")]
+    pub name_claim: String,
+    /// Claim to use for the user's email (default: "email")
+    #[serde(default = "default_email_claim")]
+    pub email_claim: String,
+}
+
+fn default_subject_claim() -> String {
+    "sub".to_string()
+}
+
+fn default_name_claim() -> String {
+    "preferred_username".to_string()
+}
+
+fn default_email_claim() -> String {
+    "email".to_string()
+}
+
+impl Default for OidcFieldMapping {
+    fn default() -> Self {
+        Self {
+            subject_claim: default_subject_claim(),
+            name_claim: default_name_claim(),
+            email_claim: default_email_claim(),
+        }
+    }
 }
 
 impl Config {

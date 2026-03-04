@@ -185,6 +185,7 @@ impl TestServerBuilder {
                 connection: database_url.clone(),
             },
             sentry_dsn: None,
+            oidc: Vec::new(),
         };
 
         // Initialize database pool

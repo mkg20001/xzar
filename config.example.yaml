@@ -29,3 +29,48 @@ externalUrl: 'https://cache.xeredo.it'
 db:
   client: 'pg'
   connection: 'postgres://postgres:postgres@localhost/xzar'
+
+# OpenID Connect providers (optional, can have multiple)
+# Each provider must have a unique 'id' used in the login URL: /auth/oidc/<id>/login
+oidc:
+  # Example: Google
+  - id: google
+    name: Google
+    issuerUrl: 'https://accounts.google.com'
+    clientId: '<google-client-id>'
+    clientSecret: '<google-client-secret>'
+    # Scopes to request (default: openid, email, profile)
+    scopes:
+      - openid
+      - email
+      - profile
+    # Field mapping: which OIDC claims map to user fields
+    mapping:
+      # Claim used for user identity (default: sub)
+      subjectClaim: sub
+      # Claim used for user name (default: preferred_username, falls back to name, email, sub)
+      nameClaim: name
+      # Claim used for email (default: email)
+      emailClaim: email
+    # Automatically create users on first login (default: false)
+    autoCreateUser: true
+    # Make new users admins (default: false)
+    newUsersAdmin: false
+
+  # Example: Keycloak/Generic OIDC
+  # - id: keycloak
+  #   name: Company SSO
+  #   issuerUrl: 'https://keycloak.example.com/realms/main'
+  #   clientId: 'xzar-cache'
+  #   clientSecret: '<client-secret>'
+  #   autoCreateUser: true
+
+  # Example: GitHub (via OIDC-compatible proxy or native)
+  # - id: github
+  #   name: GitHub
+  #   issuerUrl: 'https://token.actions.githubusercontent.com'
+  #   clientId: '<github-client-id>'
+  #   clientSecret: '<github-client-secret>'
+  #   mapping:
+  #     nameClaim: preferred_username
+  #   autoCreateUser: true

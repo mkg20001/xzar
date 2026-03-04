@@ -52,6 +52,10 @@ ed25519-dalek = { version = "2", features = ["rand_core"] }
 sha2 = "0.10"
 rand = "0.8"
 
+# OpenID Connect
+openid = { version = "0.15", default-features = false, features = ["rustls"] }
+url = "2"
+
 # Encoding
 base64 = "0.22"
 data-encoding = "2"

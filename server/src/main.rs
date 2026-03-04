@@ -13,12 +13,14 @@ use rocket::tokio;
 use rocket_cors::{AllowedOrigins, CorsOptions};
 use tracing_subscriber::EnvFilter;
 
+use std::sync::Arc;
+
 use xzar_server::auth::hash_token;
 use xzar_server::config::Config;
 use xzar_server::db::{self, Database};
 use xzar_server::gc;
 use xzar_server::models::{NewToken, NewUser, Token, User};
-use xzar_server::routes;
+use xzar_server::routes::{self, OidcClients};
 use xzar_server::schema::{tokens, users};
 use xzar_server::storage::Storage;
 
@@ -370,6 +372,25 @@ async fn run_server(
         .await
         .expect("Failed to initialize storage");
 
+    // Initialize OIDC clients if configured
+    let oidc_clients = if !config.oidc.is_empty() {
+        tracing::info!("Initializing {} OIDC provider(s)...", config.oidc.len());
+        match OidcClients::from_config(&config).await {
+            Ok(clients) => {
+                tracing::info!("OIDC providers initialized successfully");
+                Some(Arc::new(clients))
+            }
+            Err(e) => {
+                tracing::error!("Failed to initialize OIDC providers: {}", e);
+                tracing::warn!("OIDC authentication will be unavailable");
+                None
+            }
+        }
+    } else {
+        tracing::info!("No OIDC providers configured");
+        None
+    };
+
     // Clone for GC task
     let gc_pool = pool.clone();
     let gc_storage = storage.clone();
@@ -413,10 +434,55 @@ async fn run_server(
         tracing::info!("CORS enabled");
     }
 
-    let rocket = rocket
+    // Build base routes
+    let mut all_routes = routes![
+        routes::nix_cache_info,
+        routes::get_narinfo,
+        routes::get_nar,
+        routes::check_paths,
+        routes::lock_request,
+        routes::lock_extend,
+        routes::lock_clear,
+        routes::upload_nar,
+        routes::finalize_pin,
+        routes::list_pins,
+        routes::abandon_pin,
+        // Auth info
+        routes::get_self,
+        // Admin routes
+        routes::list_users,
+        routes::create_user,
+        routes::update_user,
+        routes::delete_user,
+        routes::list_tokens,
+        routes::create_token,
+        routes::update_token,
+        routes::delete_token,
+        // UI routes
+        routes::ui_index,
+        routes::ui_assets,
+    ];
+
+    // Add OIDC routes if configured
+    if oidc_clients.is_some() {
+        all_routes.extend(routes![
+            routes::list_providers,
+            routes::oidc_login,
+            routes::oidc_callback,
+        ]);
+    }
+
+    let mut rocket = rocket
         .manage(Database(pool))
         .manage(storage)
-        .manage(config.clone())
+        .manage(config.clone());
+
+    // Add OIDC clients state if available
+    if let Some(clients) = oidc_clients {
+        rocket = rocket.manage(clients);
+    }
+
+    let rocket = rocket
         .attach(AdHoc::on_liftoff("GC Task", |_| {
             Box::pin(async move {
                 // Spawn GC background task
@@ -425,36 +491,7 @@ async fn run_server(
                 });
             })
         }))
-        .mount(
-            "/",
-            routes![
-                routes::nix_cache_info,
-                routes::get_narinfo,
-                routes::get_nar,
-                routes::check_paths,
-                routes::lock_request,
-                routes::lock_extend,
-                routes::lock_clear,
-                routes::upload_nar,
-                routes::finalize_pin,
-                routes::list_pins,
-                routes::abandon_pin,
-                // Auth info
-                routes::get_self,
-                // Admin routes
-                routes::list_users,
-                routes::create_user,
-                routes::update_user,
-                routes::delete_user,
-                routes::list_tokens,
-                routes::create_token,
-                routes::update_token,
-                routes::delete_token,
-                // UI routes
-                routes::ui_index,
-                routes::ui_assets,
-            ],
-        );
+        .mount("/", all_routes);
 
     rocket.launch().await?;
 

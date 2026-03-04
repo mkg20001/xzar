@@ -84,10 +84,46 @@ diesel::table! {
     }
 }
 
+diesel::table! {
+    oidc_identities (id) {
+        id -> Int4,
+        #[max_length = 64]
+        provider_id -> Varchar,
+        #[max_length = 256]
+        subject -> Varchar,
+        user_id -> Nullable<Int4>,
+        #[max_length = 256]
+        cached_email -> Nullable<Varchar>,
+        #[max_length = 256]
+        cached_name -> Nullable<Varchar>,
+        created -> Timestamp,
+        last_login -> Timestamp,
+    }
+}
+
+diesel::table! {
+    oidc_sessions (id) {
+        id -> Int4,
+        #[max_length = 128]
+        state -> Varchar,
+        #[max_length = 64]
+        provider_id -> Varchar,
+        #[max_length = 128]
+        pkce_verifier -> Varchar,
+        #[max_length = 128]
+        nonce -> Varchar,
+        #[max_length = 1024]
+        redirect_url -> Nullable<Varchar>,
+        expires -> Timestamp,
+        created -> Timestamp,
+    }
+}
+
 diesel::joinable!(drv_locks -> drvs (drv_id));
 diesel::joinable!(drv_locks -> locks (lock_id));
 diesel::joinable!(drv_pins -> drvs (drv_id));
 diesel::joinable!(drv_pins -> pins (pin_id));
 diesel::joinable!(tokens -> users (user_id));
+diesel::joinable!(oidc_identities -> users (user_id));
 
-diesel::allow_tables_to_appear_in_same_query!(drvs, drv_locks, drv_pins, locks, pins, users, tokens,);
+diesel::allow_tables_to_appear_in_same_query!(drvs, drv_locks, drv_pins, locks, pins, users, tokens, oidc_identities, oidc_sessions,);

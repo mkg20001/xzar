@@ -2,7 +2,7 @@ use chrono::NaiveDateTime;
 use diesel::prelude::*;
 use serde::{Deserialize, Serialize};
 
-use crate::schema::{drv_locks, drv_pins, drvs, locks, pins, tokens, users};
+use crate::schema::{drv_locks, drv_pins, drvs, locks, oidc_identities, oidc_sessions, pins, tokens, users};
 
 // ============ Derivations ============
 
@@ -158,6 +158,68 @@ pub struct NewToken {
     pub token_hash: String,
     pub is_system: bool,
     pub description: Option<String>,
+}
+
+// ============ OIDC Identities ============
+
+#[derive(Debug, Clone, Queryable, Selectable, Serialize)]
+#[diesel(table_name = oidc_identities)]
+#[diesel(check_for_backend(diesel::pg::Pg))]
+pub struct OidcIdentity {
+    pub id: i32,
+    pub provider_id: String,
+    pub subject: String,
+    pub user_id: Option<i32>,
+    pub cached_email: Option<String>,
+    pub cached_name: Option<String>,
+    pub created: NaiveDateTime,
+    pub last_login: NaiveDateTime,
+}
+
+#[derive(Debug, Clone, Insertable)]
+#[diesel(table_name = oidc_identities)]
+pub struct NewOidcIdentity {
+    pub provider_id: String,
+    pub subject: String,
+    pub user_id: Option<i32>,
+    pub cached_email: Option<String>,
+    pub cached_name: Option<String>,
+}
+
+#[derive(Debug, Clone, AsChangeset)]
+#[diesel(table_name = oidc_identities)]
+pub struct UpdateOidcIdentity {
+    pub user_id: Option<i32>,
+    pub cached_email: Option<Option<String>>,
+    pub cached_name: Option<Option<String>>,
+    pub last_login: Option<NaiveDateTime>,
+}
+
+// ============ OIDC Sessions ============
+
+#[derive(Debug, Clone, Queryable, Selectable)]
+#[diesel(table_name = oidc_sessions)]
+#[diesel(check_for_backend(diesel::pg::Pg))]
+pub struct OidcSession {
+    pub id: i32,
+    pub state: String,
+    pub provider_id: String,
+    pub pkce_verifier: String,
+    pub nonce: String,
+    pub redirect_url: Option<String>,
+    pub expires: NaiveDateTime,
+    pub created: NaiveDateTime,
+}
+
+#[derive(Debug, Clone, Insertable)]
+#[diesel(table_name = oidc_sessions)]
+pub struct NewOidcSession {
+    pub state: String,
+    pub provider_id: String,
+    pub pkce_verifier: String,
+    pub nonce: String,
+    pub redirect_url: Option<String>,
+    pub expires: NaiveDateTime,
 }
 
 // ============ Auth Result Types ============
