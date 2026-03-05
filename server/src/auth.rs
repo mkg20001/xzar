@@ -1,11 +1,12 @@
+use chrono::Utc;
 use diesel::prelude::*;
 use rocket::http::Status;
 use rocket::request::{FromRequest, Outcome};
 use sha2::{Digest, Sha512};
 
 use crate::db::Database;
-use crate::models::{AuthenticatedEntity, Token, User};
-use crate::schema::{tokens, users};
+use crate::models::{AuthenticatedEntity, Session, Token, User};
+use crate::schema::{sessions, tokens, users};
 
 /// Request guard for authenticated requests
 /// Contains information about the authenticated entity
@@ -77,6 +78,30 @@ fn validate_token(
     }
 }
 
+/// Validate session token against database (for cookie-based auth)
+/// Returns Some(AuthenticatedEntity) if valid and not expired, None otherwise
+fn validate_session(
+    conn: &mut diesel::PgConnection,
+    raw_token: &str,
+) -> Option<AuthenticatedEntity> {
+    let token_hash = hash_token(raw_token);
+
+    // Query for matching session with user join, checking expiry
+    let result: Option<(Session, User)> = sessions::table
+        .inner_join(users::table)
+        .filter(sessions::token_hash.eq(&token_hash))
+        .filter(sessions::expires.gt(Utc::now().naive_utc()))
+        .select((Session::as_select(), User::as_select()))
+        .first(conn)
+        .optional()
+        .ok()?;
+
+    result.map(|(session, user)| AuthenticatedEntity::Session {
+        session_id: session.id,
+        user,
+    })
+}
+
 /// Check if there are any tokens in the database
 fn has_any_tokens(conn: &mut diesel::PgConnection) -> bool {
     tokens::table
@@ -93,56 +118,72 @@ impl<'r> FromRequest<'r> for AuthenticatedUser {
     async fn from_request(request: &'r rocket::Request<'_>) -> Outcome<Self, Self::Error> {
         let database = request.rocket().state::<Database>();
 
-        // Try Authorization header first, then fall back to cookie
-        let token = request
+        // Try Authorization header first (xzar token)
+        let auth_header_token = request
             .headers()
             .get_one("Authorization")
             .and_then(|h| h.strip_prefix("Bearer "))
-            .map(|s| s.to_string())
-            .or_else(|| {
-                request
-                    .cookies()
-                    .get("xzar_token")
-                    .map(|c| c.value().to_string())
-            });
+            .map(|s| s.to_string());
 
-        match (database, token) {
-            (Some(db), Some(raw_token)) => {
-                // Try to get a database connection
-                match db.get() {
-                    Ok(mut conn) => {
-                        if let Some(entity) = validate_token(&mut conn, &raw_token) {
-                            Outcome::Success(AuthenticatedUser { entity })
-                        } else {
-                            Outcome::Error((Status::Unauthorized, ()))
-                        }
-                    }
-                    Err(_) => Outcome::Error((Status::ServiceUnavailable, ())),
-                }
-            }
-            (Some(db), None) => {
-                // No token provided - check if we should allow dev mode
-                match db.get() {
-                    Ok(mut conn) => {
-                        if !has_any_tokens(&mut conn) {
-                            // No tokens in database - development mode
-                            tracing::warn!("No tokens in database, allowing unauthenticated access");
-                            Outcome::Success(AuthenticatedUser {
-                                entity: AuthenticatedEntity::System { token_id: 0 },
-                            })
-                        } else {
-                            Outcome::Error((Status::Unauthorized, ()))
-                        }
-                    }
-                    Err(_) => Outcome::Error((Status::ServiceUnavailable, ())),
-                }
-            }
-            (None, _) => {
-                // No database configured - should not happen in production
+        // Try xzar_token cookie (xzar token)
+        let xzar_cookie_token = request
+            .cookies()
+            .get("xzar_token")
+            .map(|c| c.value().to_string());
+
+        // Try xzar_session cookie (session token from OIDC)
+        let session_cookie_token = request
+            .cookies()
+            .get("xzar_session")
+            .map(|c| c.value().to_string());
+
+        let db = match database {
+            Some(db) => db,
+            None => {
                 tracing::error!("Database not configured");
-                Outcome::Error((Status::InternalServerError, ()))
+                return Outcome::Error((Status::InternalServerError, ()));
             }
+        };
+
+        let mut conn = match db.get() {
+            Ok(conn) => conn,
+            Err(_) => return Outcome::Error((Status::ServiceUnavailable, ())),
+        };
+
+        // Priority: Authorization header > xzar_token cookie > xzar_session cookie
+        if let Some(raw_token) = auth_header_token.or(xzar_cookie_token) {
+            tracing::debug!("Auth: validating xzar token");
+            if let Some(entity) = validate_token(&mut conn, &raw_token) {
+                tracing::debug!("Auth: xzar token valid");
+                return Outcome::Success(AuthenticatedUser { entity });
+            }
+            tracing::debug!("Auth: xzar token invalid");
+            return Outcome::Error((Status::Unauthorized, ()));
         }
+
+        // Try session token from cookie
+        if let Some(raw_token) = session_cookie_token {
+            tracing::debug!("Auth: validating session cookie");
+            if let Some(entity) = validate_session(&mut conn, &raw_token) {
+                tracing::debug!("Auth: session valid for user {:?}", entity.user().map(|u| &u.name));
+                return Outcome::Success(AuthenticatedUser { entity });
+            }
+            tracing::debug!("Auth: session invalid or expired");
+            return Outcome::Error((Status::Unauthorized, ()));
+        }
+
+        tracing::debug!("Auth: no token or session provided");
+
+        // No token provided - check if we should allow dev mode
+        if !has_any_tokens(&mut conn) {
+            // No tokens in database - development mode
+            tracing::warn!("No tokens in database, allowing unauthenticated access");
+            return Outcome::Success(AuthenticatedUser {
+                entity: AuthenticatedEntity::System { token_id: 0 },
+            });
+        }
+
+        Outcome::Error((Status::Unauthorized, ()))
     }
 }
 

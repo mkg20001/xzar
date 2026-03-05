@@ -24,8 +24,8 @@ use url::Url;
 use crate::auth::hash_token;
 use crate::config::{Config, OidcProviderConfig};
 use crate::db::Database;
-use crate::models::{NewOidcIdentity, NewOidcSession, NewToken, NewUser, OidcIdentity, OidcSession, User};
-use crate::schema::{oidc_identities, oidc_sessions, tokens, users};
+use crate::models::{NewOidcIdentity, NewOidcSession, NewSession, NewUser, OidcIdentity, OidcSession, User};
+use crate::schema::{oidc_identities, oidc_sessions, sessions, users};
 
 /// Initialized OIDC clients for each provider
 pub struct OidcClients {
@@ -447,8 +447,8 @@ pub async fn oidc_callback(
         name
     );
 
-    // Find or create identity and user
-    let (user, auth_token) = find_or_create_user_and_token(
+    // Find or create identity and user, then create session
+    let (user, session_token) = find_or_create_user_and_session(
         &mut conn,
         provider_id,
         &subject,
@@ -461,8 +461,8 @@ pub async fn oidc_callback(
         (Status::InternalServerError, format!("User creation failed: {}", e))
     })?;
 
-    // Set auth cookie with the token
-    let mut cookie = Cookie::new("xzar_token", auth_token);
+    // Set session cookie
+    let mut cookie = Cookie::new("xzar_session", session_token);
     cookie.set_path("/");
     cookie.set_http_only(true);
     cookie.set_same_site(SameSite::Lax);
@@ -705,8 +705,8 @@ async fn fetch_userinfo_fallback(
     }
 }
 
-/// Find or create user and generate token
-fn find_or_create_user_and_token(
+/// Find or create user and generate session token
+fn find_or_create_user_and_session(
     conn: &mut PgConnection,
     provider_id: &str,
     subject: &str,
@@ -804,21 +804,21 @@ fn find_or_create_user_and_token(
         user
     };
 
-    // Generate token for the user
+    // Generate session token (expires in 7 days)
     let raw_token = generate_random_token();
     let token_hash = hash_token(&raw_token);
+    let expires = Utc::now() + Duration::days(7);
 
-    let new_token = NewToken {
-        user_id: Some(user.id),
+    let new_session = NewSession {
+        user_id: user.id,
         token_hash,
-        is_system: false,
-        description: Some(format!("OIDC login via {}", provider_id)),
+        expires: expires.naive_utc(),
     };
 
-    diesel::insert_into(tokens::table)
-        .values(&new_token)
+    diesel::insert_into(sessions::table)
+        .values(&new_session)
         .execute(conn)
-        .map_err(|e| format!("Failed to create token: {}", e))?;
+        .map_err(|e| format!("Failed to create session: {}", e))?;
 
     Ok((user, raw_token))
 }
@@ -893,7 +893,13 @@ fn generate_random_string(len: usize) -> String {
 }
 
 /// Clean up expired OIDC sessions
-pub fn cleanup_expired_sessions(conn: &mut PgConnection) -> std::result::Result<usize, diesel::result::Error> {
+pub fn cleanup_expired_oidc_sessions(conn: &mut PgConnection) -> std::result::Result<usize, diesel::result::Error> {
     diesel::delete(oidc_sessions::table.filter(oidc_sessions::expires.lt(Utc::now().naive_utc())))
+        .execute(conn)
+}
+
+/// Clean up expired user sessions
+pub fn cleanup_expired_sessions(conn: &mut PgConnection) -> std::result::Result<usize, diesel::result::Error> {
+    diesel::delete(sessions::table.filter(sessions::expires.lt(Utc::now().naive_utc())))
         .execute(conn)
 }

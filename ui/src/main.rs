@@ -90,15 +90,27 @@ fn build_pin_tree(pins: &[Pin]) -> PinTreeNode {
     root
 }
 
-/// Helper to build a client - when token is empty, use cookies instead
+/// Helper to build a client
 fn build_client() -> reqwest::Client {
-    reqwest::Client::builder()
-        .build()
-        .unwrap_or_else(|_| reqwest::Client::new())
+    reqwest::Client::new()
 }
 
-/// Helper to add auth header only if token is non-empty
+/// Helper to include credentials for cookie-based auth (WASM only)
+#[cfg(target_arch = "wasm32")]
+fn with_credentials(builder: reqwest::RequestBuilder) -> reqwest::RequestBuilder {
+    builder.fetch_credentials_include()
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn with_credentials(builder: reqwest::RequestBuilder) -> reqwest::RequestBuilder {
+    builder
+}
+
+/// Helper to add auth and credentials to request
+/// - If token is provided, adds Authorization header
+/// - Always includes credentials for cookie-based auth (WASM)
 fn add_auth(builder: reqwest::RequestBuilder, token: &str) -> reqwest::RequestBuilder {
+    let builder = with_credentials(builder);
     if token.is_empty() {
         builder
     } else {
@@ -110,8 +122,7 @@ async fn fetch_oidc_providers(server_url: &str) -> Result<Vec<OidcProviderInfo>,
     let client = build_client();
     let url = format!("{}/auth/oidc/providers", server_url.trim_end_matches('/'));
 
-    let response = client
-        .get(&url)
+    let response = with_credentials(client.get(&url))
         .send()
         .await
         .map_err(|e| format!("Request failed: {}", e))?;

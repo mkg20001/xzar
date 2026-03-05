@@ -117,11 +117,23 @@ diesel::table! {
     }
 }
 
+diesel::table! {
+    sessions (id) {
+        id -> Int4,
+        user_id -> Int4,
+        #[max_length = 128]
+        token_hash -> Varchar,
+        created -> Timestamp,
+        expires -> Timestamp,
+    }
+}
+
 diesel::joinable!(drv_locks -> drvs (drv_id));
 diesel::joinable!(drv_locks -> locks (lock_id));
 diesel::joinable!(drv_pins -> drvs (drv_id));
 diesel::joinable!(drv_pins -> pins (pin_id));
 diesel::joinable!(tokens -> users (user_id));
 diesel::joinable!(oidc_identities -> users (user_id));
+diesel::joinable!(sessions -> users (user_id));
 
-diesel::allow_tables_to_appear_in_same_query!(drvs, drv_locks, drv_pins, locks, pins, users, tokens, oidc_identities, oidc_sessions,);
+diesel::allow_tables_to_appear_in_same_query!(drvs, drv_locks, drv_pins, locks, pins, users, tokens, oidc_identities, oidc_sessions, sessions,);

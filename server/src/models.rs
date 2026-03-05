@@ -2,7 +2,7 @@ use chrono::NaiveDateTime;
 use diesel::prelude::*;
 use serde::{Deserialize, Serialize};
 
-use crate::schema::{drv_locks, drv_pins, drvs, locks, oidc_identities, oidc_sessions, pins, tokens, users};
+use crate::schema::{drv_locks, drv_pins, drvs, locks, oidc_identities, oidc_sessions, pins, sessions, tokens, users};
 
 // ============ Derivations ============
 
@@ -220,6 +220,27 @@ pub struct NewOidcSession {
     pub expires: NaiveDateTime,
 }
 
+// ============ Sessions (cookie auth) ============
+
+#[derive(Debug, Clone, Queryable, Selectable)]
+#[diesel(table_name = sessions)]
+#[diesel(check_for_backend(diesel::pg::Pg))]
+pub struct Session {
+    pub id: i32,
+    pub user_id: i32,
+    pub token_hash: String,
+    pub created: NaiveDateTime,
+    pub expires: NaiveDateTime,
+}
+
+#[derive(Debug, Clone, Insertable)]
+#[diesel(table_name = sessions)]
+pub struct NewSession {
+    pub user_id: i32,
+    pub token_hash: String,
+    pub expires: NaiveDateTime,
+}
+
 // ============ Auth Result Types ============
 
 /// Result of token validation - represents the authenticated entity
@@ -229,6 +250,8 @@ pub enum AuthenticatedEntity {
     System { token_id: i32 },
     /// User token with associated user info
     User { token_id: i32, user: User },
+    /// Session-based auth (from OIDC login)
+    Session { session_id: i32, user: User },
 }
 
 impl AuthenticatedEntity {
@@ -236,6 +259,7 @@ impl AuthenticatedEntity {
         match self {
             AuthenticatedEntity::System { .. } => true,
             AuthenticatedEntity::User { user, .. } => user.is_admin,
+            AuthenticatedEntity::Session { user, .. } => user.is_admin,
         }
     }
 
@@ -243,13 +267,23 @@ impl AuthenticatedEntity {
         match self {
             AuthenticatedEntity::System { .. } => None,
             AuthenticatedEntity::User { user, .. } => Some(user),
+            AuthenticatedEntity::Session { user, .. } => Some(user),
         }
     }
 
-    pub fn token_id(&self) -> i32 {
+    pub fn token_id(&self) -> Option<i32> {
         match self {
-            AuthenticatedEntity::System { token_id } => *token_id,
-            AuthenticatedEntity::User { token_id, .. } => *token_id,
+            AuthenticatedEntity::System { token_id } => Some(*token_id),
+            AuthenticatedEntity::User { token_id, .. } => Some(*token_id),
+            AuthenticatedEntity::Session { .. } => None,
+        }
+    }
+
+    pub fn session_id(&self) -> Option<i32> {
+        match self {
+            AuthenticatedEntity::System { .. } => None,
+            AuthenticatedEntity::User { .. } => None,
+            AuthenticatedEntity::Session { session_id, .. } => Some(*session_id),
         }
     }
 }

@@ -19,6 +19,13 @@ pub fn get_self(auth: AuthenticatedUser) -> Json<SelfResponse> {
                 name: user.name.clone(),
             }),
         ),
+        crate::models::AuthenticatedEntity::Session { user, .. } => (
+            "session".to_string(),
+            Some(UserInfo {
+                id: user.id,
+                name: user.name.clone(),
+            }),
+        ),
     };
 
     Json(SelfResponse {
