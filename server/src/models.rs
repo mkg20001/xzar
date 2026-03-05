@@ -204,7 +204,6 @@ pub struct OidcSession {
     pub id: i32,
     pub state: String,
     pub provider_id: String,
-    pub pkce_verifier: String,
     pub nonce: String,
     pub redirect_url: Option<String>,
     pub expires: NaiveDateTime,
@@ -216,7 +215,6 @@ pub struct OidcSession {
 pub struct NewOidcSession {
     pub state: String,
     pub provider_id: String,
-    pub pkce_verifier: String,
     pub nonce: String,
     pub redirect_url: Option<String>,
     pub expires: NaiveDateTime,

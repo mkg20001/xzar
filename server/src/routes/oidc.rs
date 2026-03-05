@@ -157,7 +157,6 @@ pub async fn oidc_login(
     let new_session = NewOidcSession {
         state: state.clone(),
         provider_id: provider_id.to_string(),
-        pkce_verifier: String::new(), // openid crate handles PKCE internally
         nonce,
         redirect_url: redirect,
         expires: expires.naive_utc(),

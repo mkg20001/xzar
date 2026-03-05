@@ -109,8 +109,6 @@ diesel::table! {
         #[max_length = 64]
         provider_id -> Varchar,
         #[max_length = 128]
-        pkce_verifier -> Varchar,
-        #[max_length = 128]
         nonce -> Varchar,
         #[max_length = 1024]
         redirect_url -> Nullable<Varchar>,
