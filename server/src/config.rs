@@ -87,12 +87,24 @@ pub struct OidcProviderConfig {
     pub id: String,
     /// Display name for the provider (shown in UI)
     pub name: String,
-    /// OpenID Connect discovery URL (e.g., https://accounts.google.com)
+    /// OpenID Connect issuer URL (e.g., https://accounts.google.com)
     pub issuer_url: String,
     /// OAuth2 client ID
     pub client_id: String,
     /// OAuth2 client secret
     pub client_secret: String,
+    /// Whether to use OIDC discovery (default: true)
+    /// If false, you must provide authorization_endpoint and token_endpoint
+    #[serde(default = "default_true")]
+    pub discover: bool,
+    /// Authorization endpoint URL (required if discover: false)
+    pub authorization_endpoint: Option<String>,
+    /// Token endpoint URL (required if discover: false)
+    pub token_endpoint: Option<String>,
+    /// Userinfo endpoint URL (optional, used for fetching additional claims)
+    pub userinfo_endpoint: Option<String>,
+    /// JWKS URI for token verification (optional, if not provided tokens won't be signature-verified)
+    pub jwks_uri: Option<String>,
     /// OAuth2 scopes to request (default: ["openid", "email", "profile"])
     #[serde(default = "default_scopes")]
     pub scopes: Vec<String>,
@@ -105,6 +117,10 @@ pub struct OidcProviderConfig {
     /// Whether newly created users should be admins (default: false)
     #[serde(default)]
     pub new_users_admin: bool,
+}
+
+fn default_true() -> bool {
+    true
 }
 
 fn default_scopes() -> Vec<String> {

@@ -11,7 +11,9 @@ use std::sync::Arc;
 use chrono::{Duration, Utc};
 use diesel::prelude::*;
 use diesel::PgConnection;
-use openid::{Client, Discovered, Options, StandardClaims, Token, Userinfo};
+use openid::biscuit::jwk::JWKSet;
+use openid::biscuit::Empty;
+use openid::{Client, Config as OidcConfig, Discovered, Options, StandardClaims, Token, Userinfo};
 use rocket::http::{Cookie, CookieJar, SameSite, Status};
 use rocket::response::Redirect;
 use rocket::serde::json::Json;
@@ -57,20 +59,149 @@ impl OidcClients {
             let issuer = Url::parse(&provider_config.issuer_url)
                 .map_err(|e| format!("Invalid issuer URL for {}: {}", provider_config.id, e))?;
 
-            // Discover and create client
-            let client = Client::<Discovered, StandardClaims>::discover(
-                provider_config.client_id.clone(),
-                provider_config.client_secret.clone(),
-                Some(redirect_url),
-                issuer,
-            )
-            .await
-            .map_err(|e| {
-                format!(
-                    "Failed to discover OIDC metadata for {}: {}",
-                    provider_config.id, e
+            let client = if provider_config.discover {
+                // Use OIDC discovery
+                Client::<Discovered, StandardClaims>::discover(
+                    provider_config.client_id.clone(),
+                    provider_config.client_secret.clone(),
+                    Some(redirect_url),
+                    issuer,
                 )
-            })?;
+                .await
+                .map_err(|e| {
+                    format!(
+                        "Failed to discover OIDC metadata for {}: {}",
+                        provider_config.id, e
+                    )
+                })?
+            } else {
+                // Manual endpoint configuration
+                let authorization_endpoint = provider_config
+                    .authorization_endpoint
+                    .as_ref()
+                    .ok_or_else(|| {
+                        format!(
+                            "authorization_endpoint required when discover=false for {}",
+                            provider_config.id
+                        )
+                    })?;
+                let token_endpoint = provider_config.token_endpoint.as_ref().ok_or_else(|| {
+                    format!(
+                        "token_endpoint required when discover=false for {}",
+                        provider_config.id
+                    )
+                })?;
+
+                let auth_endpoint = Url::parse(authorization_endpoint).map_err(|e| {
+                    format!(
+                        "Invalid authorization_endpoint for {}: {}",
+                        provider_config.id, e
+                    )
+                })?;
+                let token_ep = Url::parse(token_endpoint).map_err(|e| {
+                    format!("Invalid token_endpoint for {}: {}", provider_config.id, e)
+                })?;
+                let jwks_url = provider_config
+                    .jwks_uri
+                    .as_ref()
+                    .map(|u| Url::parse(u))
+                    .transpose()
+                    .map_err(|e| {
+                        format!("Invalid jwks_uri for {}: {}", provider_config.id, e)
+                    })?;
+                let userinfo_ep = provider_config
+                    .userinfo_endpoint
+                    .as_ref()
+                    .map(|u| Url::parse(u))
+                    .transpose()
+                    .map_err(|e| {
+                        format!("Invalid userinfo_endpoint for {}: {}", provider_config.id, e)
+                    })?;
+
+                // Use a dummy JWKS URI if not provided (won't be used since we won't have JWKS)
+                let config_jwks_uri = jwks_url
+                    .clone()
+                    .unwrap_or_else(|| issuer.clone());
+
+                // Create OIDC config manually
+                let oidc_config = OidcConfig {
+                    issuer: issuer.clone(),
+                    authorization_endpoint: auth_endpoint,
+                    token_endpoint: token_ep,
+                    userinfo_endpoint: userinfo_ep,
+                    jwks_uri: config_jwks_uri,
+                    // Required fields with sensible defaults
+                    response_types_supported: vec!["code".to_string()],
+                    subject_types_supported: vec!["public".to_string()],
+                    id_token_signing_alg_values_supported: vec!["RS256".to_string()],
+                    // Optional fields
+                    introspection_endpoint: None,
+                    end_session_endpoint: None,
+                    registration_endpoint: None,
+                    scopes_supported: Some(provider_config.scopes.clone()),
+                    response_modes_supported: None,
+                    grant_types_supported: Some(vec!["authorization_code".to_string()]),
+                    acr_values_supported: None,
+                    id_token_encryption_alg_values_supported: None,
+                    id_token_encryption_enc_values_supported: None,
+                    userinfo_signing_alg_values_supported: None,
+                    userinfo_encryption_alg_values_supported: None,
+                    userinfo_encryption_enc_values_supported: None,
+                    request_object_signing_alg_values_supported: None,
+                    request_object_encryption_alg_values_supported: None,
+                    request_object_encryption_enc_values_supported: None,
+                    token_endpoint_auth_methods_supported: None,
+                    token_endpoint_auth_signing_alg_values_supported: None,
+                    display_values_supported: None,
+                    claim_types_supported: None,
+                    claims_supported: None,
+                    service_documentation: None,
+                    claims_locales_supported: None,
+                    ui_locales_supported: None,
+                    claims_parameter_supported: false,
+                    request_parameter_supported: false,
+                    request_uri_parameter_supported: true,
+                    require_request_uri_registration: false,
+                    op_policy_uri: None,
+                    op_tos_uri: None,
+                    code_challenge_methods_supported: None,
+                };
+
+                let http_client = reqwest::Client::new();
+
+                // Fetch JWKS only if jwks_uri is provided
+                let jwks: Option<JWKSet<Empty>> = if let Some(url) = jwks_url {
+                    let jwks_data: JWKSet<Empty> = http_client
+                        .get(url)
+                        .send()
+                        .await
+                        .map_err(|e| format!("Failed to fetch JWKS for {}: {}", provider_config.id, e))?
+                        .json()
+                        .await
+                        .map_err(|e| {
+                            format!("Failed to parse JWKS for {}: {}", provider_config.id, e)
+                        })?;
+                    Some(jwks_data)
+                } else {
+                    tracing::info!(
+                        "No jwks_uri configured for provider {}, token signatures will not be verified",
+                        provider_config.id
+                    );
+                    None
+                };
+
+                // Create provider from config
+                let provider: Discovered = oidc_config.into();
+
+                Client::new(
+                    provider,
+                    provider_config.client_id.clone(),
+                    Some(provider_config.client_secret.clone()),
+                    Some(redirect_url),
+                    http_client,
+                    jwks,
+                )
+            };
 
             clients.insert(
                 provider_config.id.clone(),
@@ -130,27 +261,20 @@ pub async fn oidc_login(
         }
     };
 
-    // Build options with scopes
+    // Generate state and nonce for CSRF protection and token validation
+    let state = generate_random_string(32);
+    let nonce = generate_random_string(32);
+
+    // Build options with scopes, state, and nonce
     let options = Options {
         scope: Some(client_info.config.scopes.join(" ")),
+        state: Some(state.clone()),
+        nonce: Some(nonce.clone()),
         ..Default::default()
     };
 
-    // Get authorization URL
+    // Get authorization URL (includes state and nonce)
     let auth_url = client_info.client.auth_url(&options);
-
-    // Extract state and nonce from the URL
-    let state = auth_url
-        .query_pairs()
-        .find(|(k, _)| k == "state")
-        .map(|(_, v)| v.to_string())
-        .unwrap_or_else(|| generate_random_string(32));
-
-    let nonce = auth_url
-        .query_pairs()
-        .find(|(k, _)| k == "nonce")
-        .map(|(_, v)| v.to_string())
-        .unwrap_or_else(|| generate_random_string(32));
 
     // Store session in database
     let expires = Utc::now() + Duration::minutes(10);

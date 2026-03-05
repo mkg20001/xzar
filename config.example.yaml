@@ -57,7 +57,7 @@ oidc:
     # Make new users admins (default: false)
     newUsersAdmin: false
 
-  # Example: Keycloak/Generic OIDC
+  # Example: Keycloak/Generic OIDC with discovery (default)
   # - id: keycloak
   #   name: Company SSO
   #   issuerUrl: 'https://keycloak.example.com/realms/main'
@@ -65,12 +65,34 @@ oidc:
   #   clientSecret: '<client-secret>'
   #   autoCreateUser: true
 
-  # Example: GitHub (via OIDC-compatible proxy or native)
+  # Example: Manual endpoint configuration (discover: false)
+  # Use this when the provider doesn't support .well-known/openid-configuration
+  # - id: custom
+  #   name: Custom Provider
+  #   issuerUrl: 'https://auth.example.com'
+  #   clientId: '<client-id>'
+  #   clientSecret: '<client-secret>'
+  #   discover: false
+  #   authorizationEndpoint: 'https://auth.example.com/oauth2/authorize'
+  #   tokenEndpoint: 'https://auth.example.com/oauth2/token'
+  #   userinfoEndpoint: 'https://auth.example.com/oauth2/userinfo'  # optional
+  #   jwksUri: 'https://auth.example.com/.well-known/jwks.json'
+  #   autoCreateUser: true
+
+  # Example: GitHub OAuth (not OIDC, so no discovery or token verification)
   # - id: github
   #   name: GitHub
-  #   issuerUrl: 'https://token.actions.githubusercontent.com'
+  #   issuerUrl: 'https://github.com'
   #   clientId: '<github-client-id>'
   #   clientSecret: '<github-client-secret>'
+  #   discover: false
+  #   authorizationEndpoint: 'https://github.com/login/oauth/authorize'
+  #   tokenEndpoint: 'https://github.com/login/oauth/access_token'
+  #   userinfoEndpoint: 'https://api.github.com/user'
+  #   # No jwksUri - GitHub OAuth doesn't use JWTs, tokens won't be signature-verified
+  #   scopes:
+  #     - user:email
+  #     - read:user
   #   mapping:
   #     nameClaim: preferred_username
   #   autoCreateUser: true
