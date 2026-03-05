@@ -362,18 +362,82 @@ pub async fn oidc_callback(
             (Status::InternalServerError, "Token exchange failed".to_string())
         })?;
 
-    // Get user info from token claims
-    let userinfo: Option<&Userinfo> = token.id_token
-        .as_ref()
-        .and_then(|t| t.payload().ok())
-        .map(|claims: &StandardClaims| &claims.userinfo);
+    // Get userinfo - either from ID token claims or by fetching from userinfo endpoint
+    let userinfo: Option<Userinfo> = if let Some(ref id_token) = token.id_token {
+        // OIDC flow - get claims from ID token
+        let claims = id_token.payload().ok();
+        tracing::debug!(
+            "OIDC provider {} id_token claims: {:?}",
+            provider_id,
+            claims
+        );
+        claims.map(|c: &StandardClaims| c.userinfo.clone())
+    } else {
+        // OAuth2 flow (e.g., GitHub) - fetch from userinfo endpoint
+        tracing::debug!(
+            "OIDC provider {} has no id_token, fetching from userinfo endpoint",
+            provider_id
+        );
 
-    let subject = userinfo
+        // First try the openid crate's native method
+        match client_info.client.request_userinfo(&token).await {
+            Ok(info) => {
+                tracing::debug!(
+                    "OIDC provider {} userinfo response: {:?}",
+                    provider_id,
+                    info
+                );
+                Some(info)
+            }
+            Err(e) => {
+                // Fallback: fetch manually with custom headers (some providers like GitHub require this)
+                tracing::debug!(
+                    "OIDC provider {} native userinfo fetch failed ({}), trying fallback",
+                    provider_id,
+                    e
+                );
+                fetch_userinfo_fallback(&client_info.client, &token, provider_id).await
+            }
+        }
+    };
+
+    let userinfo_ref = userinfo.as_ref();
+
+    // Extract subject (use "unknown" as fallback)
+    let subject = userinfo_ref
         .and_then(|u| u.sub.clone())
-        .unwrap_or_else(|| "unknown".to_string());
+        .unwrap_or_else(|| {
+            tracing::warn!("OIDC provider {} did not return a subject claim, using 'unknown'", provider_id);
+            "unknown".to_string()
+        });
 
-    let email = userinfo.and_then(|u| u.email.clone());
-    let name = extract_name_from_userinfo(userinfo, &client_info.config);
+    // Extract email using configured mapping
+    let email = extract_email_from_userinfo(userinfo_ref, &client_info.config, provider_id);
+
+    // Extract name using configured mapping
+    let name = extract_name_from_userinfo(userinfo_ref, &client_info.config, provider_id);
+
+    // Fail if we cannot establish identity (no name AND no email)
+    if name.is_none() && email.is_none() {
+        tracing::error!(
+            "OIDC provider {} did not return enough user information. \
+             Neither name (claim: {}) nor email (claim: {}) could be extracted. \
+             Subject: {}",
+            provider_id,
+            client_info.config.mapping.name_claim,
+            client_info.config.mapping.email_claim,
+            subject
+        );
+        return Err((
+            Status::BadRequest,
+            format!(
+                "Cannot establish user identity: no name or email available from provider. \
+                 Check that the provider returns the configured claims ({}, {}).",
+                client_info.config.mapping.name_claim,
+                client_info.config.mapping.email_claim
+            ),
+        ));
+    }
 
     tracing::debug!(
         "OIDC callback for provider {}: subject={}, email={:?}, name={:?}",
@@ -416,54 +480,229 @@ pub async fn oidc_callback(
     Ok(Redirect::to(redirect_url))
 }
 
+/// Extract email from userinfo using configured mapping
+fn extract_email_from_userinfo(
+    userinfo: Option<&Userinfo>,
+    config: &OidcProviderConfig,
+    provider_id: &str,
+) -> Option<String> {
+    let userinfo = userinfo?;
+    let claim = &config.mapping.email_claim;
+
+    let result = match claim.as_str() {
+        "email" => userinfo.email.clone(),
+        other => {
+            tracing::error!(
+                "OIDC provider {}: unknown email claim '{}', only 'email' is supported",
+                provider_id,
+                other
+            );
+            None
+        }
+    };
+
+    if result.is_none() {
+        tracing::warn!(
+            "OIDC provider {}: email claim '{}' not present in token",
+            provider_id,
+            claim
+        );
+    }
+
+    result
+}
+
 /// Extract name from userinfo using configured mapping
 fn extract_name_from_userinfo(
     userinfo: Option<&Userinfo>,
     config: &OidcProviderConfig,
+    provider_id: &str,
 ) -> Option<String> {
     let userinfo = userinfo?;
+    let claim = &config.mapping.name_claim;
 
-    // Try the configured claim
-    match config.mapping.name_claim.as_str() {
-        "preferred_username" => {
-            if let Some(ref username) = userinfo.preferred_username {
-                return Some(username.clone());
-            }
+    // Try the configured claim first
+    let result = match claim.as_str() {
+        "preferred_username" => userinfo.preferred_username.clone(),
+        "name" => userinfo.name.clone(),
+        "nickname" => userinfo.nickname.clone(),
+        "email" => userinfo.email.as_ref().and_then(|e| {
+            e.split('@').next().map(|s| s.to_string())
+        }),
+        "sub" => userinfo.sub.clone(),
+        other => {
+            tracing::error!(
+                "OIDC provider {}: unknown name claim '{}', supported claims are: \
+                 preferred_username, name, nickname, email, sub",
+                provider_id,
+                other
+            );
+            None
         }
-        "name" => {
-            if let Some(ref name) = userinfo.name {
-                return Some(name.clone());
-            }
-        }
-        "nickname" => {
-            if let Some(ref nickname) = userinfo.nickname {
-                return Some(nickname.clone());
-            }
-        }
-        _ => {}
+    };
+
+    if result.is_some() {
+        return result;
     }
+
+    // Log that configured claim was not found
+    tracing::warn!(
+        "OIDC provider {}: name claim '{}' not present in token, trying fallbacks",
+        provider_id,
+        claim
+    );
 
     // Fallback chain: preferred_username -> name -> nickname -> email local part -> subject
     if let Some(ref username) = userinfo.preferred_username {
+        tracing::debug!("OIDC provider {}: using fallback claim 'preferred_username'", provider_id);
         return Some(username.clone());
     }
 
     if let Some(ref name) = userinfo.name {
+        tracing::debug!("OIDC provider {}: using fallback claim 'name'", provider_id);
         return Some(name.clone());
     }
 
     if let Some(ref nickname) = userinfo.nickname {
+        tracing::debug!("OIDC provider {}: using fallback claim 'nickname'", provider_id);
         return Some(nickname.clone());
     }
 
     if let Some(ref email) = userinfo.email {
         if let Some(local) = email.split('@').next() {
+            tracing::debug!("OIDC provider {}: using email local part as name fallback", provider_id);
             return Some(local.to_string());
         }
     }
 
-    // Last resort: use subject
-    userinfo.sub.clone()
+    if let Some(ref sub) = userinfo.sub {
+        tracing::debug!("OIDC provider {}: using subject as name fallback", provider_id);
+        return Some(sub.clone());
+    }
+
+    tracing::error!(
+        "OIDC provider {}: no name claim could be extracted from token",
+        provider_id
+    );
+    None
+}
+
+/// Fallback userinfo fetch with custom headers for providers like GitHub
+async fn fetch_userinfo_fallback(
+    client: &Client<Discovered, StandardClaims>,
+    token: &Token<StandardClaims>,
+    provider_id: &str,
+) -> Option<Userinfo> {
+    let userinfo_url = client.config().userinfo_endpoint.as_ref()?;
+    let access_token = &token.bearer.access_token;
+    let http_client = reqwest::Client::new();
+
+    let response = match http_client
+        .get(userinfo_url.clone())
+        .header("Authorization", format!("Bearer {}", access_token))
+        .header("User-Agent", "xzar-server")
+        .header("Accept", "application/json")
+        .send()
+        .await
+    {
+        Ok(r) => r,
+        Err(e) => {
+            tracing::error!(
+                "OIDC provider {} fallback userinfo fetch failed: {}",
+                provider_id,
+                e
+            );
+            return None;
+        }
+    };
+
+    if !response.status().is_success() {
+        tracing::error!(
+            "OIDC provider {} fallback userinfo request failed: {}",
+            provider_id,
+            response.status()
+        );
+        return None;
+    }
+
+    let text = match response.text().await {
+        Ok(t) => t,
+        Err(e) => {
+            tracing::error!(
+                "OIDC provider {} failed to read userinfo response: {}",
+                provider_id,
+                e
+            );
+            return None;
+        }
+    };
+
+    tracing::debug!(
+        "OIDC provider {} raw userinfo response: {}",
+        provider_id,
+        text
+    );
+
+    // Try to parse as standard Userinfo first
+    if let Ok(info) = serde_json::from_str::<Userinfo>(&text) {
+        return Some(info);
+    }
+
+    // Try parsing as generic JSON and map common OAuth2 fields
+    match serde_json::from_str::<serde_json::Value>(&text) {
+        Ok(json) => {
+            let sub = json.get("id")
+                .and_then(|v| v.as_i64())
+                .map(|id| id.to_string())
+                .or_else(|| json.get("sub").and_then(|v| v.as_str()).map(|s| s.to_string()));
+            let preferred_username = json.get("login")
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_string());
+            let name = json.get("name")
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_string());
+            let email = json.get("email")
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_string());
+
+            let info = Userinfo {
+                sub,
+                name,
+                email,
+                preferred_username,
+                given_name: None,
+                family_name: None,
+                middle_name: None,
+                nickname: None,
+                profile: None,
+                picture: None,
+                website: None,
+                email_verified: false,
+                gender: None,
+                birthdate: None,
+                zoneinfo: None,
+                locale: None,
+                phone_number: None,
+                phone_number_verified: false,
+                address: None,
+                updated_at: None,
+            };
+            tracing::debug!(
+                "OIDC provider {} mapped userinfo: {:?}",
+                provider_id,
+                info
+            );
+            Some(info)
+        }
+        Err(e) => {
+            tracing::error!(
+                "OIDC provider {} failed to parse userinfo as JSON: {}",
+                provider_id,
+                e
+            );
+            None
+        }
+    }
 }
 
 /// Find or create user and generate token
