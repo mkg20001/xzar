@@ -27,13 +27,13 @@
         ];
 
         # Common Rust package build settings
-        buildRustPackage = { pname, cargoBuildFlags ? [], buildInputs ? [], ... }@args:
+        buildRustPackage = { pname, cargoBuildFlags ? [], buildInputs ? [], nativeBuildInputs ? [], ... }@args:
           pkgs.rustPlatform.buildRustPackage (args // {
             inherit pname;
             version = "0.1.0";
             src = ./.;
             cargoLock.lockFile = ./Cargo.lock;
-            nativeBuildInputs = commonBuildInputs;
+            nativeBuildInputs = commonBuildInputs ++ nativeBuildInputs;
             inherit buildInputs cargoBuildFlags;
           });
 
@@ -78,13 +78,25 @@
         };
 
         packages = {
-          # Server package
+          # Server package (with embedded UI)
           xzar-server = buildRustPackage {
             pname = "xzar-server";
-            cargoBuildFlags = [ "-p" "xzar-server" ];
+            cargoBuildFlags = [ "-p" "xzar-server" "--features" "embed-ui" ];
             buildInputs = with pkgs; [
               postgresql.lib
             ];
+            nativeBuildInputs = with pkgs; [
+              dioxus-cli
+              wasm-bindgen-cli
+              binaryen
+              rustToolchain
+              llvmPackages.lld
+            ];
+            preBuild = ''
+              dx build --release --package xzar-ui
+            '';
+            # Skip tests as they require client binary and postgres
+            doCheck = false;
             meta = with pkgs.lib; {
               description = "A pinning-based Nix cache server";
               license = licenses.mit;
@@ -103,7 +115,7 @@
               wrapProgram $out/bin/xzar \
                 --prefix PATH : ${pkgs.lib.makeBinPath [ pkgs.nix pkgs.xz pkgs.pixz ]}
             '';
-            nativeBuildInputs = commonBuildInputs ++ [ pkgs.makeWrapper ];
+            nativeBuildInputs = [ pkgs.makeWrapper ];
             meta = with pkgs.lib; {
               description = "CLI client for xzar Nix binary cache";
               license = licenses.mpl20;
