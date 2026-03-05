@@ -6,7 +6,7 @@ use common::InlineEdit;
 use dioxus::prelude::*;
 use xzar_common::{
     format_duration, AdminTokenResponse, AdminUserResponse, CreateTokenResponse,
-    PinResponse as Pin, SelfResponse,
+    OidcProviderInfo, PinResponse as Pin, SelfResponse,
 };
 
 const TAILWIND_CSS: &str = include_str!("../assets/tailwind.css");
@@ -90,13 +90,47 @@ fn build_pin_tree(pins: &[Pin]) -> PinTreeNode {
     root
 }
 
-async fn fetch_pins(server_url: &str, token: &str) -> Result<Vec<Pin>, String> {
-    let client = reqwest::Client::new();
-    let url = format!("{}/pins", server_url.trim_end_matches('/'));
+/// Helper to build a client - when token is empty, use cookies instead
+fn build_client() -> reqwest::Client {
+    reqwest::Client::builder()
+        .build()
+        .unwrap_or_else(|_| reqwest::Client::new())
+}
+
+/// Helper to add auth header only if token is non-empty
+fn add_auth(builder: reqwest::RequestBuilder, token: &str) -> reqwest::RequestBuilder {
+    if token.is_empty() {
+        builder
+    } else {
+        builder.header("Authorization", format!("Bearer {}", token))
+    }
+}
+
+async fn fetch_oidc_providers(server_url: &str) -> Result<Vec<OidcProviderInfo>, String> {
+    let client = build_client();
+    let url = format!("{}/auth/oidc/providers", server_url.trim_end_matches('/'));
 
     let response = client
         .get(&url)
-        .header("Authorization", format!("Bearer {}", token))
+        .send()
+        .await
+        .map_err(|e| format!("Request failed: {}", e))?;
+
+    if !response.status().is_success() {
+        return Err(format!("Server error: {}", response.status()));
+    }
+
+    response
+        .json()
+        .await
+        .map_err(|e| format!("Failed to parse response: {}", e))
+}
+
+async fn fetch_pins(server_url: &str, token: &str) -> Result<Vec<Pin>, String> {
+    let client = build_client();
+    let url = format!("{}/pins", server_url.trim_end_matches('/'));
+
+    let response = add_auth(client.get(&url), token)
         .send()
         .await
         .map_err(|e| format!("Request failed: {}", e))?;
@@ -112,12 +146,10 @@ async fn fetch_pins(server_url: &str, token: &str) -> Result<Vec<Pin>, String> {
 }
 
 async fn abandon_pin(server_url: &str, token: &str, pin_id: i32) -> Result<(), String> {
-    let client = reqwest::Client::new();
+    let client = build_client();
     let url = format!("{}/pins/{}", server_url.trim_end_matches('/'), pin_id);
 
-    let response = client
-        .delete(&url)
-        .header("Authorization", format!("Bearer {}", token))
+    let response = add_auth(client.delete(&url), token)
         .send()
         .await
         .map_err(|e| format!("Request failed: {}", e))?;
@@ -132,12 +164,10 @@ async fn abandon_pin(server_url: &str, token: &str, pin_id: i32) -> Result<(), S
 // ============ Self/Auth Info API ============
 
 async fn fetch_self(server_url: &str, token: &str) -> Result<SelfResponse, String> {
-    let client = reqwest::Client::new();
+    let client = build_client();
     let url = format!("{}/self", server_url.trim_end_matches('/'));
 
-    let response = client
-        .get(&url)
-        .header("Authorization", format!("Bearer {}", token))
+    let response = add_auth(client.get(&url), token)
         .send()
         .await
         .map_err(|e| format!("Request failed: {}", e))?;
@@ -155,12 +185,10 @@ async fn fetch_self(server_url: &str, token: &str) -> Result<SelfResponse, Strin
 // ============ Admin Users API ============
 
 async fn fetch_users(server_url: &str, token: &str) -> Result<Vec<AdminUserResponse>, String> {
-    let client = reqwest::Client::new();
+    let client = build_client();
     let url = format!("{}/admin/users", server_url.trim_end_matches('/'));
 
-    let response = client
-        .get(&url)
-        .header("Authorization", format!("Bearer {}", token))
+    let response = add_auth(client.get(&url), token)
         .send()
         .await
         .map_err(|e| format!("Request failed: {}", e))?;
@@ -176,12 +204,10 @@ async fn fetch_users(server_url: &str, token: &str) -> Result<Vec<AdminUserRespo
 }
 
 async fn create_user(server_url: &str, token: &str, name: &str, is_admin: bool) -> Result<AdminUserResponse, String> {
-    let client = reqwest::Client::new();
+    let client = build_client();
     let url = format!("{}/admin/users", server_url.trim_end_matches('/'));
 
-    let response = client
-        .post(&url)
-        .header("Authorization", format!("Bearer {}", token))
+    let response = add_auth(client.post(&url), token)
         .json(&serde_json::json!({ "name": name, "isAdmin": is_admin }))
         .send()
         .await
@@ -206,7 +232,7 @@ async fn update_user(
     is_admin: Option<bool>,
     email: Option<Option<String>>,
 ) -> Result<(), String> {
-    let client = reqwest::Client::new();
+    let client = build_client();
     let url = format!("{}/admin/users/{}", server_url.trim_end_matches('/'), user_id);
 
     // Build request body with only specified fields
@@ -221,9 +247,7 @@ async fn update_user(
         body.insert("email".to_string(), serde_json::json!(email));
     }
 
-    let response = client
-        .patch(&url)
-        .header("Authorization", format!("Bearer {}", token))
+    let response = add_auth(client.patch(&url), token)
         .json(&body)
         .send()
         .await
@@ -237,12 +261,10 @@ async fn update_user(
 }
 
 async fn delete_user(server_url: &str, token: &str, user_id: i32) -> Result<(), String> {
-    let client = reqwest::Client::new();
+    let client = build_client();
     let url = format!("{}/admin/users/{}", server_url.trim_end_matches('/'), user_id);
 
-    let response = client
-        .delete(&url)
-        .header("Authorization", format!("Bearer {}", token))
+    let response = add_auth(client.delete(&url), token)
         .send()
         .await
         .map_err(|e| format!("Request failed: {}", e))?;
@@ -257,12 +279,10 @@ async fn delete_user(server_url: &str, token: &str, user_id: i32) -> Result<(), 
 // ============ Admin Tokens API ============
 
 async fn fetch_tokens(server_url: &str, token: &str) -> Result<Vec<AdminTokenResponse>, String> {
-    let client = reqwest::Client::new();
+    let client = build_client();
     let url = format!("{}/admin/tokens", server_url.trim_end_matches('/'));
 
-    let response = client
-        .get(&url)
-        .header("Authorization", format!("Bearer {}", token))
+    let response = add_auth(client.get(&url), token)
         .send()
         .await
         .map_err(|e| format!("Request failed: {}", e))?;
@@ -278,12 +298,10 @@ async fn fetch_tokens(server_url: &str, token: &str) -> Result<Vec<AdminTokenRes
 }
 
 async fn create_token(server_url: &str, token: &str, user_id: Option<i32>, description: Option<&str>) -> Result<CreateTokenResponse, String> {
-    let client = reqwest::Client::new();
+    let client = build_client();
     let url = format!("{}/admin/tokens", server_url.trim_end_matches('/'));
 
-    let response = client
-        .post(&url)
-        .header("Authorization", format!("Bearer {}", token))
+    let response = add_auth(client.post(&url), token)
         .json(&serde_json::json!({ "userId": user_id, "description": description }))
         .send()
         .await
@@ -300,12 +318,10 @@ async fn create_token(server_url: &str, token: &str, user_id: Option<i32>, descr
 }
 
 async fn update_token(server_url: &str, token: &str, token_id: i32, description: Option<&str>) -> Result<(), String> {
-    let client = reqwest::Client::new();
+    let client = build_client();
     let url = format!("{}/admin/tokens/{}", server_url.trim_end_matches('/'), token_id);
 
-    let response = client
-        .put(&url)
-        .header("Authorization", format!("Bearer {}", token))
+    let response = add_auth(client.put(&url), token)
         .json(&serde_json::json!({ "description": description }))
         .send()
         .await
@@ -319,12 +335,10 @@ async fn update_token(server_url: &str, token: &str, token_id: i32, description:
 }
 
 async fn delete_token(server_url: &str, token: &str, token_id: i32) -> Result<(), String> {
-    let client = reqwest::Client::new();
+    let client = build_client();
     let url = format!("{}/admin/tokens/{}", server_url.trim_end_matches('/'), token_id);
 
-    let response = client
-        .delete(&url)
-        .header("Authorization", format!("Bearer {}", token))
+    let response = add_auth(client.delete(&url), token)
         .send()
         .await
         .map_err(|e| format!("Request failed: {}", e))?;
@@ -350,6 +364,32 @@ fn App() -> Element {
     let mut authenticated = use_signal(|| false);
     let mut self_info = use_signal(|| Option::<SelfResponse>::None);
     let mut active_tab = use_signal(|| ActiveTab::Pins);
+    let mut oidc_providers = use_signal(|| Vec::<OidcProviderInfo>::new());
+    let mut checking_auth = use_signal(|| true);
+
+    // On mount: check if already authenticated (via cookie) and load OIDC providers
+    use_effect(move || {
+        spawn(async move {
+            let server_url = SERVER_URL.read().clone();
+
+            // Try to fetch /self with empty token (will use cookie if present)
+            if let Ok(info) = fetch_self(&server_url, "").await {
+                self_info.set(Some(info));
+                // Also fetch pins
+                if let Ok(fetched_pins) = fetch_pins(&server_url, "").await {
+                    pins.set(fetched_pins);
+                    authenticated.set(true);
+                }
+            }
+
+            // Fetch OIDC providers
+            if let Ok(providers) = fetch_oidc_providers(&server_url).await {
+                oidc_providers.set(providers);
+            }
+
+            checking_auth.set(false);
+        });
+    });
 
     let load_pins = move |_| async move {
         loading.set(true);
@@ -422,54 +462,85 @@ fn App() -> Element {
 
                 // Login form
                 if !*authenticated.read() {
-                    div { class: "max-w-md mx-auto",
-                        div { class: "bg-white rounded-xl shadow-lg overflow-hidden",
-                            // Header
-                            div { class: "bg-gradient-to-r from-blue-600 to-blue-700 px-6 py-8 text-center",
-                                div { class: "text-4xl mb-3", "🔐" }
-                                h2 { class: "text-xl font-semibold text-white", "Connect to Server" }
-                                p { class: "text-blue-200 text-sm mt-1", "Enter your cache server details" }
-                            }
-
-                            // Form
-                            div { class: "p-6 space-y-5",
-                                div {
-                                    label { class: "block text-sm font-medium text-gray-700 mb-2",
-                                        "Server URL"
-                                    }
-                                    input {
-                                        class: "w-full px-4 py-3 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-shadow",
-                                        r#type: "text",
-                                        placeholder: "http://localhost:17788",
-                                        value: "{SERVER_URL}",
-                                        oninput: move |e| *SERVER_URL.write() = e.value()
-                                    }
+                    if *checking_auth.read() {
+                        div { class: "max-w-md mx-auto text-center py-12",
+                            div { class: "text-4xl mb-4", "⏳" }
+                            p { class: "text-gray-500", "Checking authentication..." }
+                        }
+                    } else {
+                        div { class: "max-w-md mx-auto",
+                            div { class: "bg-white rounded-xl shadow-lg overflow-hidden",
+                                // Header
+                                div { class: "bg-gradient-to-r from-blue-600 to-blue-700 px-6 py-8 text-center",
+                                    div { class: "text-4xl mb-3", "🔐" }
+                                    h2 { class: "text-xl font-semibold text-white", "Connect to Server" }
+                                    p { class: "text-blue-200 text-sm mt-1", "Enter your cache server details" }
                                 }
 
-                                div {
-                                    label { class: "block text-sm font-medium text-gray-700 mb-2",
-                                        "Token"
+                                // Form
+                                div { class: "p-6 space-y-5",
+                                    div {
+                                        label { class: "block text-sm font-medium text-gray-700 mb-2",
+                                            "Server URL"
+                                        }
+                                        input {
+                                            class: "w-full px-4 py-3 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-shadow",
+                                            r#type: "text",
+                                            placeholder: "http://localhost:17788",
+                                            value: "{SERVER_URL}",
+                                            oninput: move |e| *SERVER_URL.write() = e.value()
+                                        }
                                     }
-                                    input {
-                                        class: "w-full px-4 py-3 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-shadow",
-                                        r#type: "password",
-                                        placeholder: "Enter your upload token",
-                                        value: "{TOKEN}",
-                                        oninput: move |e| *TOKEN.write() = e.value()
+
+                                    // OIDC providers
+                                    if !oidc_providers.read().is_empty() {
+                                        div { class: "space-y-2",
+                                            p { class: "text-sm font-medium text-gray-700 mb-2", "Sign in with" }
+                                            for provider in oidc_providers.read().iter() {
+                                                a {
+                                                    key: "{provider.id}",
+                                                    class: "flex items-center justify-center gap-2 w-full bg-gray-100 text-gray-800 py-3 px-4 rounded-lg font-medium hover:bg-gray-200 transition-colors",
+                                                    href: "{SERVER_URL}/auth/oidc/{provider.id}/login",
+                                                    "🔑 {provider.name}"
+                                                }
+                                            }
+                                        }
+
+                                        div { class: "relative my-4",
+                                            div { class: "absolute inset-0 flex items-center",
+                                                div { class: "w-full border-t border-gray-200" }
+                                            }
+                                            div { class: "relative flex justify-center text-sm",
+                                                span { class: "px-2 bg-white text-gray-500", "or use token" }
+                                            }
+                                        }
                                     }
-                                }
 
-                                button {
-                                    class: "w-full bg-blue-600 text-white py-3 px-4 rounded-lg font-medium hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 disabled:opacity-50 transition-colors",
-                                    disabled: *loading.read(),
-                                    onclick: load_pins,
-                                    if *loading.read() { "⏳ Connecting..." } else { "→ Connect" }
-                                }
+                                    div {
+                                        label { class: "block text-sm font-medium text-gray-700 mb-2",
+                                            "Token"
+                                        }
+                                        input {
+                                            class: "w-full px-4 py-3 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-shadow",
+                                            r#type: "password",
+                                            placeholder: "Enter your upload token",
+                                            value: "{TOKEN}",
+                                            oninput: move |e| *TOKEN.write() = e.value()
+                                        }
+                                    }
 
-                                if let Some(err) = error.read().as_ref() {
-                                    div { class: "p-4 bg-red-50 text-red-700 rounded-lg border border-red-200 flex items-start gap-2",
-                                        span { class: "flex-shrink-0", "⚠️" }
-                                        span { "{err}" }
+                                    button {
+                                        class: "w-full bg-blue-600 text-white py-3 px-4 rounded-lg font-medium hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 disabled:opacity-50 transition-colors",
+                                        disabled: *loading.read(),
+                                        onclick: load_pins,
+                                        if *loading.read() { "⏳ Connecting..." } else { "→ Connect" }
+                                    }
+
+                                    if let Some(err) = error.read().as_ref() {
+                                        div { class: "p-4 bg-red-50 text-red-700 rounded-lg border border-red-200 flex items-start gap-2",
+                                            span { class: "flex-shrink-0", "⚠️" }
+                                            span { "{err}" }
+                                        }
                                     }
                                 }
                             }

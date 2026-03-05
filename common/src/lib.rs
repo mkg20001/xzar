@@ -196,6 +196,15 @@ pub struct UpdateTokenRequest {
     pub description: Option<String>,
 }
 
+// ============ OIDC Types ============
+
+/// OIDC provider info from /auth/oidc/providers
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct OidcProviderInfo {
+    pub id: String,
+    pub name: String,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
