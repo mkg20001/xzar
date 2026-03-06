@@ -11,31 +11,38 @@
   };
 
   outputs = { self, nixpkgs, flake-utils, rust-overlay }:
+    let
+      # Overlay that adds xzar packages
+      xzarOverlay = final: prev:
+        let
+          rustToolchain = final.rust-bin.stable.latest.default.override {
+            extensions = [ "rust-src" "rust-analyzer" ];
+            targets = [ "wasm32-unknown-unknown" ];
+          };
+        in {
+          xzar-server = final.callPackage ./nix/xzar-server.nix {
+            inherit rustToolchain;
+            src = self;
+          };
+          xzar-client = final.callPackage ./nix/xzar-client.nix {
+            src = self;
+          };
+        };
+    in
     flake-utils.lib.eachDefaultSystem (system:
       let
-        overlays = [ (import rust-overlay) ];
         pkgs = import nixpkgs {
-          inherit system overlays;
+          inherit system;
+          overlays = [
+            (import rust-overlay)
+            xzarOverlay
+          ];
         };
+
         rustToolchain = pkgs.rust-bin.stable.latest.default.override {
           extensions = [ "rust-src" "rust-analyzer" ];
           targets = [ "wasm32-unknown-unknown" ];
         };
-
-        commonBuildInputs = with pkgs; [
-          pkg-config
-        ];
-
-        # Common Rust package build settings
-        buildRustPackage = { pname, cargoBuildFlags ? [], buildInputs ? [], nativeBuildInputs ? [], ... }@args:
-          pkgs.rustPlatform.buildRustPackage (args // {
-            inherit pname;
-            version = "0.1.0";
-            src = ./.;
-            cargoLock.lockFile = ./Cargo.lock;
-            nativeBuildInputs = commonBuildInputs ++ nativeBuildInputs;
-            inherit buildInputs cargoBuildFlags;
-          });
 
         # Test script with all dependencies
         testScript = pkgs.writeShellApplication {
@@ -78,54 +85,9 @@
         };
 
         packages = {
-          # Server package (with embedded UI)
-          xzar-server = buildRustPackage {
-            pname = "xzar-server";
-            cargoBuildFlags = [ "-p" "xzar-server" "--features" "embed-ui" ];
-            buildInputs = with pkgs; [
-              postgresql.lib
-            ];
-            nativeBuildInputs = with pkgs; [
-              dioxus-cli
-              wasm-bindgen-cli
-              binaryen
-              rustToolchain
-              llvmPackages.lld
-            ];
-            preBuild = ''
-              dx build --release --package xzar-ui
-            '';
-            # Skip tests as they require client binary and postgres
-            doCheck = false;
-            meta = with pkgs.lib; {
-              description = "A pinning-based Nix cache server";
-              license = licenses.mit;
-            };
-          };
-
-          # Client package
-          xzar-client = buildRustPackage {
-            pname = "xzar-client";
-            cargoBuildFlags = [ "-p" "xzar-client" ];
-            buildInputs = with pkgs; [
-              xz
-            ];
-            # Client needs nix-store and xz/pixz at runtime
-            postInstall = ''
-              wrapProgram $out/bin/xzar \
-                --prefix PATH : ${pkgs.lib.makeBinPath [ pkgs.nix pkgs.xz pkgs.pixz ]}
-            '';
-            nativeBuildInputs = [ pkgs.makeWrapper ];
-            meta = with pkgs.lib; {
-              description = "CLI client for xzar Nix binary cache";
-              license = licenses.mpl20;
-            };
-          };
-
-          # Default is server
-          default = self.packages.${system}.xzar-server;
-
-          # Test script package
+          xzar-server = pkgs.xzar-server;
+          xzar-client = pkgs.xzar-client;
+          default = pkgs.xzar-server;
           integration-tests = testScript;
         };
 
@@ -138,6 +100,15 @@
         };
       }
     ) // {
+      # Overlays
+      overlays = {
+        default = nixpkgs.lib.composeManyExtensions [
+          (import rust-overlay)
+          xzarOverlay
+        ];
+        xzar = xzarOverlay;
+      };
+
       nixosModules.xzar = import ./module.nix;
     };
 }
