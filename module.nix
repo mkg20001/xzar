@@ -5,6 +5,13 @@ with lib;
 let
   cfg = config.services.xzar-server;
   xzar-server = pkgs.xzar-server;
+
+  configFile = pkgs.writeText "xzar-config.yaml" (builtins.toJSON cfg.config);
+
+  xzar-server-wrapped = pkgs.writeShellScriptBin "xzar-server" ''
+    export XZAR_CONFIG=${configFile}
+    exec ${xzar-server}/bin/xzar-server "$@"
+  '';
 in
 {
   options = {
@@ -70,21 +77,21 @@ in
       allowedTCPPorts = [ cfg.port ];
     };
 
-    systemd.services.xzar-server = with pkgs; {
+    environment.systemPackages = [ xzar-server-wrapped ];
+
+    systemd.services.xzar-server = {
       wantedBy = [ "multi-user.target" ];
       after = [ "network.target" ];
       requires = [ "network-online.target" ];
 
       description = "xzar-server";
 
-      environment.CONFIG = with builtins; toFile "config.json" (toJSON cfg.config);
-
       serviceConfig = {
         Type = "simple";
         DynamicUser = true;
         User = "xzar-server";
         StateDirectory = "xzar-server";
-        ExecStart = "${xzar-server}/bin/xzar-server";
+        ExecStart = "${xzar-server-wrapped}/bin/xzar-server serve";
       };
     };
 
