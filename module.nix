@@ -54,10 +54,7 @@ in
 
       db = {
         client = "pg";
-        connection = {
-          host = "/run/postgresql";
-          database = "xzar";
-        };
+        connection = "postgres://xzar-server@/xzar?host=/run/postgresql";
       };
     };
 
