@@ -1,4 +1,5 @@
 mod api;
+mod config;
 mod nix;
 mod upload;
 
@@ -11,6 +12,7 @@ use indicatif::{ProgressBar, ProgressStyle};
 use tracing_subscriber::EnvFilter;
 
 use crate::api::{format_duration, ApiClient};
+use crate::config::Config;
 use crate::nix::NixStore;
 use crate::upload::UploadManager;
 
@@ -175,12 +177,13 @@ async fn main() -> Result<()> {
 
     let args = Args::parse();
 
-    let server = args
-        .server
-        .ok_or_else(|| anyhow::anyhow!("--server is required"))?;
-    let key = args
-        .key
-        .ok_or_else(|| anyhow::anyhow!("--key is required"))?;
+    // Load config file (if it exists)
+    let config = Config::load().unwrap_or_default();
+
+    // Resolve server and key from CLI args and config
+    let (server, key) = config
+        .resolve_server_and_key(args.server.as_deref(), args.key.as_deref())
+        .map_err(|e| anyhow::anyhow!("{}", e))?;
 
     // Create API client
     let api = ApiClient::new(&server, &key)?;
