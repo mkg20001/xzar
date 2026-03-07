@@ -13,8 +13,15 @@ const TAILWIND_CSS: &str = include_str!("../assets/tailwind.css");
 
 // ============ Global Signals ============
 
-static SERVER_URL: GlobalSignal<String> = Signal::global(|| String::from("http://localhost:17788"));
+static SERVER_URL: GlobalSignal<String> = Signal::global(|| String::new());
 static TOKEN: GlobalSignal<String> = Signal::global(|| String::new());
+
+/// Get the base URL for API requests
+/// Returns empty string for relative URLs (same origin) or the configured SERVER_URL
+fn get_base_url() -> String {
+    let url = SERVER_URL.read().clone();
+    url.trim_end_matches('/').to_string()
+}
 
 fn main() {
     dioxus::launch(App);
@@ -381,7 +388,7 @@ fn App() -> Element {
     // On mount: check if already authenticated (via cookie) and load OIDC providers
     use_effect(move || {
         spawn(async move {
-            let server_url = SERVER_URL.read().clone();
+            let server_url = get_base_url();
 
             // Try to fetch /self with empty token (will use cookie if present)
             if let Ok(info) = fetch_self(&server_url, "").await {
@@ -406,7 +413,7 @@ fn App() -> Element {
         loading.set(true);
         error.set(None);
 
-        let server_url = SERVER_URL.read().clone();
+        let server_url = get_base_url();
         let token = TOKEN.read().clone();
 
         // First fetch self info
@@ -441,7 +448,7 @@ fn App() -> Element {
         loading.set(true);
         error.set(None);
 
-        let server_url = SERVER_URL.read().clone();
+        let server_url = get_base_url();
         let token = TOKEN.read().clone();
 
         match fetch_pins(&server_url, &token).await {
@@ -508,11 +515,17 @@ fn App() -> Element {
                                         div { class: "space-y-2",
                                             p { class: "text-sm font-medium text-gray-700 mb-2", "Sign in with" }
                                             for provider in oidc_providers.read().iter() {
-                                                a {
-                                                    key: "{provider.id}",
-                                                    class: "flex items-center justify-center gap-2 w-full bg-gray-100 text-gray-800 py-3 px-4 rounded-lg font-medium hover:bg-gray-200 transition-colors",
-                                                    href: "{SERVER_URL}/auth/oidc/{provider.id}/login",
-                                                    "🔑 {provider.name}"
+                                                {
+                                                    let base = get_base_url();
+                                                    let href = format!("{}/auth/oidc/{}/login", base, provider.id);
+                                                    rsx! {
+                                                        a {
+                                                            key: "{provider.id}",
+                                                            class: "flex items-center justify-center gap-2 w-full bg-gray-100 text-gray-800 py-3 px-4 rounded-lg font-medium hover:bg-gray-200 transition-colors",
+                                                            href: "{href}",
+                                                            "🔑 {provider.name}"
+                                                        }
+                                                    }
                                                 }
                                             }
                                         }
@@ -637,7 +650,7 @@ fn App() -> Element {
                                             path: String::new(),
                                             depth: 0,
                                             on_refresh: move |_| async move {
-                                                let server_url = SERVER_URL.read().clone();
+                                                let server_url = get_base_url();
                                                 let token = TOKEN.read().clone();
                                                 if let Ok(fetched_pins) = fetch_pins(&server_url, &token).await {
                                                     pins.set(fetched_pins);
@@ -825,7 +838,7 @@ fn PinLeaf(
             abandoning.set(true);
             abandon_error.set(None);
 
-            let server_url = SERVER_URL.read().clone();
+            let server_url = get_base_url();
             let token = TOKEN.read().clone();
 
             match abandon_pin(&server_url, &token, pin_id).await {
@@ -982,7 +995,7 @@ fn AdminPanel() -> Element {
     use_effect(move || {
         spawn(async move {
             loading.set(true);
-            let server_url = SERVER_URL.read().clone();
+            let server_url = get_base_url();
             let token = TOKEN.read().clone();
             if let Ok(u) = fetch_users(&server_url, &token).await {
                 users.set(u);
@@ -1035,7 +1048,7 @@ fn AdminPanel() -> Element {
                             users: users.read().clone(),
                             on_refresh: move |_| {
                                 spawn(async move {
-                                    let server_url = SERVER_URL.read().clone();
+                                    let server_url = get_base_url();
                                     let token = TOKEN.read().clone();
                                     if let Ok(u) = fetch_users(&server_url, &token).await {
                                         users.set(u);
@@ -1050,7 +1063,7 @@ fn AdminPanel() -> Element {
                             users: users.read().clone(),
                             on_refresh: move |_| {
                                 spawn(async move {
-                                    let server_url = SERVER_URL.read().clone();
+                                    let server_url = get_base_url();
                                     let token = TOKEN.read().clone();
                                     if let Ok(t) = fetch_tokens(&server_url, &token).await {
                                         tokens_list.set(t);
@@ -1083,7 +1096,7 @@ fn UsersPanel(
             creating.set(true);
             create_error.set(None);
 
-            let server_url = SERVER_URL.read().clone();
+            let server_url = get_base_url();
             let token = TOKEN.read().clone();
 
             match create_user(&server_url, &token, &name, is_admin).await {
@@ -1200,7 +1213,7 @@ fn UserRow(
     let handle_toggle = move |_| {
         async move {
             toggling.set(true);
-            let server_url = SERVER_URL.read().clone();
+            let server_url = get_base_url();
             let token = TOKEN.read().clone();
             if update_user(&server_url, &token, user_id, None, Some(!is_admin), None).await.is_ok() {
                 on_refresh.call(());
@@ -1212,7 +1225,7 @@ fn UserRow(
     let handle_delete = move |_| {
         async move {
             deleting.set(true);
-            let server_url = SERVER_URL.read().clone();
+            let server_url = get_base_url();
             let token = TOKEN.read().clone();
             if delete_user(&server_url, &token, user_id).await.is_ok() {
                 on_refresh.call(());
@@ -1232,7 +1245,7 @@ fn UserRow(
                         if let Some(name) = new_name {
                             if !name.is_empty() {
                                 spawn(async move {
-                                    let server_url = SERVER_URL.read().clone();
+                                    let server_url = get_base_url();
                                     let token = TOKEN.read().clone();
                                     if update_user(&server_url, &token, user_id, Some(name), None, None).await.is_ok() {
                                         on_refresh.call(());
@@ -1249,7 +1262,7 @@ fn UserRow(
                     placeholder: "-",
                     on_save: move |new_email: Option<String>| {
                         spawn(async move {
-                            let server_url = SERVER_URL.read().clone();
+                            let server_url = get_base_url();
                             let token = TOKEN.read().clone();
                             if update_user(&server_url, &token, user_id, None, None, Some(new_email)).await.is_ok() {
                                 on_refresh.call(());
@@ -1310,7 +1323,7 @@ fn TokensPanel(
             creating.set(true);
             create_error.set(None);
 
-            let server_url = SERVER_URL.read().clone();
+            let server_url = get_base_url();
             let token = TOKEN.read().clone();
 
             match create_token(&server_url, &token, user_id, desc.as_deref()).await {
@@ -1456,7 +1469,7 @@ fn TokenRow(
     let handle_delete = move |_| {
         async move {
             deleting.set(true);
-            let server_url = SERVER_URL.read().clone();
+            let server_url = get_base_url();
             let auth_token = TOKEN.read().clone();
             if delete_token(&server_url, &auth_token, token_id).await.is_ok() {
                 on_refresh.call(());
@@ -1488,7 +1501,7 @@ fn TokenRow(
                     placeholder: "-",
                     on_save: move |new_desc: Option<String>| {
                         spawn(async move {
-                            let server_url = SERVER_URL.read().clone();
+                            let server_url = get_base_url();
                             let auth_token = TOKEN.read().clone();
                             if update_token(&server_url, &auth_token, token_id, new_desc.as_deref()).await.is_ok() {
                                 on_refresh.call(());
