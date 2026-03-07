@@ -11,16 +11,42 @@ use xzar_common::{
 
 const TAILWIND_CSS: &str = include_str!("../assets/tailwind.css");
 
+// ============ Logging ============
+
+#[cfg(target_arch = "wasm32")]
+fn log(msg: &str) {
+    web_sys::console::log_1(&msg.into());
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn log(msg: &str) {
+    println!("{}", msg);
+}
+
 // ============ Global Signals ============
 
 static SERVER_URL: GlobalSignal<String> = Signal::global(|| String::new());
 static TOKEN: GlobalSignal<String> = Signal::global(|| String::new());
 
 /// Get the base URL for API requests
-/// Returns empty string for relative URLs (same origin) or the configured SERVER_URL
+/// Returns current origin for relative URLs (same origin) or the configured SERVER_URL
 fn get_base_url() -> String {
     let url = SERVER_URL.read().clone();
-    url.trim_end_matches('/').to_string()
+    if url.is_empty() {
+        // Use current window origin for relative URLs
+        #[cfg(target_arch = "wasm32")]
+        {
+            web_sys::window()
+                .and_then(|w| w.location().origin().ok())
+                .unwrap_or_default()
+        }
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            String::new()
+        }
+    } else {
+        url.trim_end_matches('/').to_string()
+    }
 }
 
 fn main() {
@@ -389,14 +415,22 @@ fn App() -> Element {
     use_effect(move || {
         spawn(async move {
             let server_url = get_base_url();
+            log(&format!("Base URL: {}", server_url));
 
             // Try to fetch /self with empty token (will use cookie if present)
-            if let Ok(info) = fetch_self(&server_url, "").await {
-                self_info.set(Some(info));
-                // Also fetch pins
-                if let Ok(fetched_pins) = fetch_pins(&server_url, "").await {
-                    pins.set(fetched_pins);
-                    authenticated.set(true);
+            log("Fetching /self...");
+            match fetch_self(&server_url, "").await {
+                Ok(info) => {
+                    log(&format!("Got /self: {:?}", info.credential_type));
+                    self_info.set(Some(info));
+                    // Also fetch pins
+                    if let Ok(fetched_pins) = fetch_pins(&server_url, "").await {
+                        pins.set(fetched_pins);
+                        authenticated.set(true);
+                    }
+                }
+                Err(e) => {
+                    log(&format!("Failed to fetch /self: {}", e));
                 }
             }
 
