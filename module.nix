@@ -6,7 +6,8 @@ let
   cfg = config.services.xzar-server;
   xzar-server = pkgs.xzar-server;
 
-  configFile = pkgs.writeText "xzar-config.yaml" (builtins.toJSON cfg.config);
+  yamlFormat = pkgs.formats.yaml { };
+  configFile = yamlFormat.generate "xzar-config.yaml" cfg.config;
 
   xzar-server-wrapped = pkgs.writeShellScriptBin "xzar-server" ''
     export XZAR_CONFIG=${configFile}
