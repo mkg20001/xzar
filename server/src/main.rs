@@ -121,6 +121,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         std::env::var("XZAR_CONFIG").unwrap_or_else(|_| args.config.clone());
     let config = Config::load(&config_path)?;
 
+    // Validate required config
+    if config.signing_key.is_none() {
+        return Err("signingKey is required in config. Generate with: nix-store --generate-binary-cache-key <name> <secret-file> <public-file>".into());
+    }
+
     // Initialize database pool
     let manager = ConnectionManager::<PgConnection>::new(&config.db.connection);
     let pool = Pool::builder().max_size(10).build(manager)?;
