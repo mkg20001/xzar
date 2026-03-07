@@ -55,6 +55,7 @@ impl OidcClients {
                     .unwrap_or("http://localhost:17788"),
                 provider_config.id
             );
+            tracing::info!("OIDC provider {} redirect URL: {}", provider_config.id, redirect_url);
 
             let issuer = Url::parse(&provider_config.issuer_url)
                 .map_err(|e| format!("Invalid issuer URL for {}: {}", provider_config.id, e))?;
