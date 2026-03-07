@@ -75,6 +75,12 @@ enum Command {
         #[command(subcommand)]
         action: TokenAction,
     },
+
+    /// Manage client configuration
+    Config {
+        #[command(subcommand)]
+        action: ConfigAction,
+    },
 }
 
 #[derive(Subcommand, Debug)]
@@ -117,6 +123,34 @@ enum UserAction {
         id: i32,
         /// New email (omit to clear)
         email: Option<String>,
+    },
+}
+
+#[derive(Subcommand, Debug)]
+enum ConfigAction {
+    /// Add a server to the config
+    AddServer {
+        /// Server name (identifier)
+        name: String,
+        /// Server URL
+        url: String,
+        /// API key
+        key: String,
+        /// Set as default server
+        #[arg(long)]
+        default: bool,
+    },
+    /// Set the default server
+    SetDefault {
+        /// Server name to set as default (omit to clear)
+        name: Option<String>,
+    },
+    /// List configured servers
+    List,
+    /// Remove a server from config
+    Remove {
+        /// Server name to remove
+        name: String,
     },
 }
 
@@ -177,6 +211,11 @@ async fn main() -> Result<()> {
 
     let args = Args::parse();
 
+    // Handle config commands first (they don't need server/key)
+    if let Command::Config { action } = args.command {
+        return cmd_config(action);
+    }
+
     // Load config file (if it exists)
     let config = Config::load().unwrap_or_default();
 
@@ -200,6 +239,7 @@ async fn main() -> Result<()> {
         Command::List => cmd_list(api).await,
         Command::User { action } => cmd_user(api, action).await,
         Command::Token { action } => cmd_token(api, action).await,
+        Command::Config { .. } => unreachable!(), // Handled above
     }
 }
 
@@ -474,6 +514,93 @@ async fn cmd_token(api: ApiClient, action: TokenAction) -> Result<()> {
                 .context("Failed to revoke token")?;
 
             println!("Revoked token {}", id);
+        }
+    }
+
+    Ok(())
+}
+
+fn cmd_config(action: ConfigAction) -> Result<()> {
+    let mut config = Config::load().unwrap_or_default();
+
+    match action {
+        ConfigAction::AddServer {
+            name,
+            url,
+            key,
+            default,
+        } => {
+            config.add_server(name.clone(), url.clone(), key);
+
+            if default {
+                config.set_default_server(Some(name.clone()));
+            }
+
+            config.save().map_err(|e| anyhow::anyhow!("{}", e))?;
+
+            println!("Added server '{}'", name);
+            if default {
+                println!("Set '{}' as default server", name);
+            }
+
+            if let Some(path) = Config::path() {
+                println!("Config saved to {}", path.display());
+            }
+        }
+
+        ConfigAction::SetDefault { name } => {
+            if let Some(ref server_name) = name {
+                // Verify the server exists
+                if config.find_server(server_name).is_none() {
+                    anyhow::bail!(
+                        "Server '{}' not found in config. Add it first with 'xzar config add-server'",
+                        server_name
+                    );
+                }
+            }
+
+            config.set_default_server(name.clone());
+            config.save().map_err(|e| anyhow::anyhow!("{}", e))?;
+
+            match name {
+                Some(n) => println!("Set '{}' as default server", n),
+                None => println!("Cleared default server"),
+            }
+        }
+
+        ConfigAction::List => {
+            if config.servers.is_empty() {
+                println!("No servers configured.");
+                if let Some(path) = Config::path() {
+                    println!("Config file: {}", path.display());
+                }
+                return Ok(());
+            }
+
+            println!("Configured servers:\n");
+
+            for server in &config.servers {
+                let is_default = config.default_server.as_deref() == Some(&server.name);
+                let default_marker = if is_default { " (default)" } else { "" };
+
+                println!("  {}{}", server.name, default_marker);
+                println!("    URL: {}", server.url);
+                println!("    Key: {}...", &server.key[..server.key.len().min(20)]);
+                println!();
+            }
+
+            if let Some(path) = Config::path() {
+                println!("Config file: {}", path.display());
+            }
+        }
+
+        ConfigAction::Remove { name } => {
+            if config.remove_server(&name) {
+                config.save().map_err(|e| anyhow::anyhow!("{}", e))?;
+                println!("Removed server '{}'", name);
+            } else {
+                println!("Server '{}' not found in config", name);
+            }
         }
     }
 

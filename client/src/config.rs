@@ -54,6 +54,49 @@ impl Config {
         self.find_server(default_name)
     }
 
+    /// Save config to the default location
+    pub fn save(&self) -> Result<(), String> {
+        let path = Self::path().ok_or("Could not determine config directory")?;
+
+        // Create parent directory if needed
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent)
+                .map_err(|e| format!("Failed to create config directory: {}", e))?;
+        }
+
+        let contents =
+            toml::to_string_pretty(self).map_err(|e| format!("Failed to serialize config: {}", e))?;
+
+        fs::write(&path, contents).map_err(|e| format!("Failed to write config file: {}", e))?;
+
+        Ok(())
+    }
+
+    /// Add or update a server in the config
+    pub fn add_server(&mut self, name: String, url: String, key: String) {
+        // Remove existing server with same name if present
+        self.servers.retain(|s| s.name != name);
+        self.servers.push(ServerConfig { name, url, key });
+    }
+
+    /// Set the default server
+    pub fn set_default_server(&mut self, name: Option<String>) {
+        self.default_server = name;
+    }
+
+    /// Remove a server from the config
+    pub fn remove_server(&mut self, name: &str) -> bool {
+        let len_before = self.servers.len();
+        self.servers.retain(|s| s.name != name);
+
+        // Clear default if it was the removed server
+        if self.default_server.as_deref() == Some(name) {
+            self.default_server = None;
+        }
+
+        self.servers.len() < len_before
+    }
+
     /// Resolve server URL and key from CLI arguments and config
     ///
     /// Returns (server_url, api_key) or an error message
