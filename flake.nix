@@ -15,7 +15,8 @@
       # Overlay that adds xzar packages
       xzarOverlay = final: prev:
         let
-          rustToolchain = final.rust-bin.stable.latest.default.override {
+          rustBin = (import rust-overlay final prev).rust-bin;
+          rustToolchain = rustBin.stable.latest.default.override {
             extensions = [ "rust-src" "rust-analyzer" ];
             targets = [ "wasm32-unknown-unknown" ];
           };
@@ -102,11 +103,7 @@
     ) // {
       # Overlays
       overlays = {
-        default = nixpkgs.lib.composeManyExtensions [
-          (import rust-overlay)
-          xzarOverlay
-        ];
-        xzar = xzarOverlay;
+        default = xzarOverlay;
       };
 
       nixosModules.xzar = import ./module.nix;
