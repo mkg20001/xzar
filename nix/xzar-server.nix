@@ -3,7 +3,7 @@
 , pkg-config
 , postgresql
 , dioxus-cli
-, wasm-bindgen-cli
+, wasm-bindgen-cli_0_2_114
 , binaryen
 , rustToolchain
 , llvmPackages
@@ -21,7 +21,7 @@ rustPlatform.buildRustPackage {
   nativeBuildInputs = [
     pkg-config
     dioxus-cli
-    wasm-bindgen-cli
+    wasm-bindgen-cli_0_2_114
     binaryen
     rustToolchain
     llvmPackages.lld

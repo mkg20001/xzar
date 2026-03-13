@@ -78,7 +78,7 @@
 
             # Dioxus CLI and WASM tools
             dioxus-cli
-            wasm-bindgen-cli
+            wasm-bindgen-cli_0_2_114
             binaryen
           ];
 
