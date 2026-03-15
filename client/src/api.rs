@@ -2,6 +2,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::{anyhow, Context, Result};
+use chrono::{NaiveDateTime, Utc};
 use reqwest::multipart::{Form, Part};
 use reqwest::Client;
 use serde::Deserialize;
@@ -90,11 +91,12 @@ impl ApiClient {
 
         let result: LockResponse = self.handle_response(response).await?;
         let lock_id = result.lock;
+        let deadline = result.deadline;
 
         // Start lock renewal task
         let client = self.clone();
         let renewal_task = tokio::spawn(async move {
-            client.lock_renewal_loop(lock_id).await;
+            client.lock_renewal_loop(lock_id, deadline).await;
         });
 
         let mut lock_guard = self.lock.lock().await;
@@ -106,23 +108,53 @@ impl ApiClient {
         Ok(lock_id)
     }
 
-    async fn lock_renewal_loop(&self, lock_id: i32) {
-        // Renew every hour
-        let mut interval = tokio::time::interval(Duration::from_secs(3600));
-        interval.tick().await; // Skip first immediate tick
+    async fn lock_renewal_loop(&self, lock_id: i32, initial_deadline: String) {
+        let mut deadline = initial_deadline;
 
         loop {
-            interval.tick().await;
-            if let Err(e) = self.extend_lock(lock_id).await {
-                tracing::warn!("Failed to extend lock: {}", e);
-            } else {
-                tracing::debug!("Lock {} extended", lock_id);
+            // Calculate time until 1 hour before deadline
+            let sleep_duration = match Self::time_until_renewal(&deadline) {
+                Some(duration) => duration,
+                None => {
+                    tracing::warn!("Failed to parse lock deadline '{}', using 1 hour fallback", deadline);
+                    Duration::from_secs(3600)
+                }
+            };
+
+            tracing::debug!("Lock {} will renew in {:?}", lock_id, sleep_duration);
+            tokio::time::sleep(sleep_duration).await;
+
+            match self.extend_lock(lock_id).await {
+                Ok(new_deadline) => {
+                    tracing::debug!("Lock {} extended, new deadline: {}", lock_id, new_deadline);
+                    deadline = new_deadline;
+                }
+                Err(e) => {
+                    tracing::warn!("Failed to extend lock: {}", e);
+                    // Retry in 1 minute on failure
+                    tokio::time::sleep(Duration::from_secs(60)).await;
+                }
             }
         }
     }
 
-    /// Extend lock deadline
-    async fn extend_lock(&self, lock_id: i32) -> Result<()> {
+    /// Calculate time until renewal (1 hour before deadline)
+    fn time_until_renewal(deadline: &str) -> Option<Duration> {
+        let deadline_dt = NaiveDateTime::parse_from_str(deadline, "%Y-%m-%dT%H:%M:%S%.f").ok()?;
+        let now = Utc::now().naive_utc();
+        let renew_at = deadline_dt - chrono::Duration::hours(1);
+        let until_renewal = renew_at.signed_duration_since(now);
+
+        if until_renewal.num_seconds() <= 0 {
+            // Already past renewal time, renew immediately
+            Some(Duration::from_secs(0))
+        } else {
+            Some(Duration::from_secs(until_renewal.num_seconds() as u64))
+        }
+    }
+
+    /// Extend lock deadline, returns new deadline
+    async fn extend_lock(&self, lock_id: i32) -> Result<String> {
         let response = self.client
             .post(format!("{}/lock/extend", self.base_url))
             .header("Authorization", format!("Bearer {}", self.key))
@@ -131,8 +163,8 @@ impl ApiClient {
             .await
             .context("Failed to extend lock")?;
 
-        let _: LockResponse = self.handle_response(response).await?;
-        Ok(())
+        let result: LockResponse = self.handle_response(response).await?;
+        Ok(result.deadline)
     }
 
     /// Release the lock
