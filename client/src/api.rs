@@ -194,7 +194,7 @@ impl ApiClient {
         lock_guard.as_ref().map(|s| s.id)
     }
 
-    /// Upload a NAR file
+    /// Upload a NAR file, streaming compressed data directly
     pub async fn upload_nar(
         &self,
         lock_id: i32,
@@ -203,7 +203,7 @@ impl ApiClient {
         size: u64,
         deriver: &str,
         references: &[String],
-        data: Vec<u8>,
+        body: reqwest::Body,
     ) -> Result<()> {
         let mut form = Form::new()
             .text("lock", lock_id.to_string())
@@ -218,8 +218,8 @@ impl ApiClient {
             form = form.text("references[]", reference.clone());
         }
 
-        // Add file
-        let part = Part::bytes(data)
+        // Add streaming file part
+        let part = Part::stream(body)
             .file_name("nar.xz")
             .mime_str("application/x-xz")?;
         form = form.part("file", part);

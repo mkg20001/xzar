@@ -67,14 +67,15 @@ impl UploadManager {
                     let basename = NixStore::basename(&path);
                     progress.set_message(format!("uploading {}", basename));
 
-                    // Get path details and compress NAR in parallel preparation
-                    let details_fut = nix.get_details(&path);
-                    let nar_fut = nix.dump_nar_compressed(&path, use_pixz);
+                    // Start streaming compression (spawns processes, returns immediately)
+                    let body = nix.dump_nar_stream(&path, use_pixz)
+                        .with_context(|| format!("Failed to start compression for {}", path))?;
 
-                    let (details, compressed_data) = tokio::try_join!(details_fut, nar_fut)
-                        .with_context(|| format!("Failed to prepare {}", path))?;
+                    // Get path details while compression streams
+                    let details = nix.get_details(&path).await
+                        .with_context(|| format!("Failed to get details for {}", path))?;
 
-                    // Upload to server
+                    // Stream compressed data directly to server
                     api.upload_nar(
                         lock_id,
                         &basename,
@@ -82,7 +83,7 @@ impl UploadManager {
                         details.size,
                         &details.deriver,
                         &details.references,
-                        compressed_data,
+                        body,
                     ).await
                         .with_context(|| format!("Failed to upload {}", path))?;
 

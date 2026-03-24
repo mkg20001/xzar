@@ -3,9 +3,10 @@ use std::process::Stdio;
 use std::sync::OnceLock;
 
 use anyhow::{anyhow, Context, Result};
-use async_compression::tokio::write::XzEncoder;
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use async_compression::tokio::bufread::XzEncoder;
+use tokio::io::{AsyncWriteExt, BufReader};
 use tokio::process::Command;
+use tokio_util::io::ReaderStream;
 
 /// Check once whether pixz is available on PATH
 fn pixz_available() -> bool {
@@ -176,32 +177,25 @@ impl NixStore {
             .context("Failed to spawn nix-store --dump")
     }
 
-    /// Dump a store path as NAR and compress with xz
-    /// Streams nix-store --dump output directly into the compressor
-    pub async fn dump_nar_compressed(&self, path: &str, use_pixz: bool) -> Result<Vec<u8>> {
+    /// Dump a store path as NAR and compress with xz, returning a streaming body.
+    /// Data flows: nix-store --dump → compressor → HTTP upload without buffering.
+    pub fn dump_nar_stream(&self, path: &str, use_pixz: bool) -> Result<reqwest::Body> {
         let mut nar_process = Self::spawn_nar_dump(path)?;
         let nar_stdout = nar_process.stdout.take()
             .ok_or_else(|| anyhow!("Failed to get stdout from nix-store"))?;
 
-        let compressed_data = if use_pixz && pixz_available() {
-            Self::compress_external(nar_stdout, "pixz").await?
+        if use_pixz && pixz_available() {
+            Self::compress_stream_external(nar_stdout, "pixz")
         } else {
-            Self::compress_inprocess(nar_stdout).await?
-        };
-
-        let nar_status = nar_process.wait().await?;
-        if !nar_status.success() {
-            return Err(anyhow!("nix-store --dump failed"));
+            Ok(Self::compress_stream_inprocess(nar_stdout))
         }
-
-        Ok(compressed_data)
     }
 
-    /// Compress a stream using an external command (pixz)
-    async fn compress_external(
-        mut nar_stdout: tokio::process::ChildStdout,
+    /// Stream compressed data from an external compressor (pixz)
+    fn compress_stream_external(
+        nar_stdout: tokio::process::ChildStdout,
         compressor: &str,
-    ) -> Result<Vec<u8>> {
+    ) -> Result<reqwest::Body> {
         let mut xz_process = Command::new(compressor)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
@@ -211,45 +205,30 @@ impl NixStore {
 
         let mut xz_stdin = xz_process.stdin.take()
             .ok_or_else(|| anyhow!("Failed to get stdin for {}", compressor))?;
-        let mut xz_stdout = xz_process.stdout.take()
+        let xz_stdout = xz_process.stdout.take()
             .ok_or_else(|| anyhow!("Failed to get stdout from {}", compressor))?;
 
-        // Pipe data from nix-store to compressor in a separate task
-        let pipe_task = tokio::spawn(async move {
-            tokio::io::copy(&mut nar_stdout, &mut xz_stdin).await?;
-            xz_stdin.shutdown().await?;
-            Ok::<_, std::io::Error>(())
+        // Pipe nix-store stdout → compressor stdin in background
+        tokio::spawn(async move {
+            let mut nar_stdout = nar_stdout;
+            if let Err(e) = tokio::io::copy(&mut nar_stdout, &mut xz_stdin).await {
+                tracing::error!("Failed to pipe NAR to compressor: {}", e);
+            }
+            let _ = xz_stdin.shutdown().await;
         });
 
-        // Read compressed output
-        let mut compressed_data = Vec::new();
-        xz_stdout.read_to_end(&mut compressed_data).await
-            .context("Failed to read compressed NAR")?;
-
-        pipe_task.await
-            .context("Pipe task panicked")?
-            .context("Failed to pipe NAR to compressor")?;
-
-        let xz_status = xz_process.wait().await?;
-        if !xz_status.success() {
-            return Err(anyhow!("{} compression failed", compressor));
-        }
-
-        Ok(compressed_data)
+        // Stream compressor stdout directly to upload
+        let stream = ReaderStream::new(xz_stdout);
+        Ok(reqwest::Body::wrap_stream(stream))
     }
 
-    /// Compress a stream using in-process xz via async-compression
-    async fn compress_inprocess(
-        mut nar_stdout: tokio::process::ChildStdout,
-    ) -> Result<Vec<u8>> {
-        let mut encoder = XzEncoder::new(Vec::new());
-
-        tokio::io::copy(&mut nar_stdout, &mut encoder).await
-            .context("Failed to compress NAR")?;
-        encoder.shutdown().await
-            .context("Failed to finalize xz compression")?;
-
-        Ok(encoder.into_inner())
+    /// Stream compressed data using in-process xz via async-compression
+    fn compress_stream_inprocess(
+        nar_stdout: tokio::process::ChildStdout,
+    ) -> reqwest::Body {
+        let encoder = XzEncoder::new(BufReader::new(nar_stdout));
+        let stream = ReaderStream::new(encoder);
+        reqwest::Body::wrap_stream(stream)
     }
 
     /// Get basename of a path
