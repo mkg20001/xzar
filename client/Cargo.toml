@@ -1,5 +1,5 @@
 [package]
-name = "xzar-client"
+name = "xzar"
 version = "0.1.0"
 edition = "2021"
 description = "CLI client for xzar Nix binary cache"
