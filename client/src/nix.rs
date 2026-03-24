@@ -165,33 +165,43 @@ impl NixStore {
         Ok(String::new())
     }
 
-    /// Dump a store path as NAR and compress with xz
-    /// Returns the compressed data
-    pub async fn dump_nar_compressed(&self, path: &str, use_pixz: bool) -> Result<Vec<u8>> {
-        if use_pixz && pixz_available() {
-            self.dump_nar_compressed_external(path, "pixz").await
-        } else {
-            self.dump_nar_compressed_inprocess(path).await
-        }
-    }
-
-    /// Compress NAR using an external command (pixz or xz)
-    async fn dump_nar_compressed_external(&self, path: &str, compressor: &str) -> Result<Vec<u8>> {
-        use tokio::io::copy;
-
-        // Spawn nix-store --dump
-        let mut nar_process = Command::new("nix-store")
+    /// Spawn nix-store --dump and return the child process
+    fn spawn_nar_dump(path: &str) -> Result<tokio::process::Child> {
+        Command::new("nix-store")
             .arg("--dump")
             .arg(path)
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .spawn()
-            .context("Failed to spawn nix-store --dump")?;
+            .context("Failed to spawn nix-store --dump")
+    }
 
-        let mut nar_stdout = nar_process.stdout.take()
+    /// Dump a store path as NAR and compress with xz
+    /// Streams nix-store --dump output directly into the compressor
+    pub async fn dump_nar_compressed(&self, path: &str, use_pixz: bool) -> Result<Vec<u8>> {
+        let mut nar_process = Self::spawn_nar_dump(path)?;
+        let nar_stdout = nar_process.stdout.take()
             .ok_or_else(|| anyhow!("Failed to get stdout from nix-store"))?;
 
-        // Spawn compressor
+        let compressed_data = if use_pixz && pixz_available() {
+            Self::compress_external(nar_stdout, "pixz").await?
+        } else {
+            Self::compress_inprocess(nar_stdout).await?
+        };
+
+        let nar_status = nar_process.wait().await?;
+        if !nar_status.success() {
+            return Err(anyhow!("nix-store --dump failed"));
+        }
+
+        Ok(compressed_data)
+    }
+
+    /// Compress a stream using an external command (pixz)
+    async fn compress_external(
+        mut nar_stdout: tokio::process::ChildStdout,
+        compressor: &str,
+    ) -> Result<Vec<u8>> {
         let mut xz_process = Command::new(compressor)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
@@ -206,7 +216,7 @@ impl NixStore {
 
         // Pipe data from nix-store to compressor in a separate task
         let pipe_task = tokio::spawn(async move {
-            copy(&mut nar_stdout, &mut xz_stdin).await?;
+            tokio::io::copy(&mut nar_stdout, &mut xz_stdin).await?;
             xz_stdin.shutdown().await?;
             Ok::<_, std::io::Error>(())
         });
@@ -216,19 +226,11 @@ impl NixStore {
         xz_stdout.read_to_end(&mut compressed_data).await
             .context("Failed to read compressed NAR")?;
 
-        // Wait for pipe task
         pipe_task.await
             .context("Pipe task panicked")?
             .context("Failed to pipe NAR to compressor")?;
 
-        // Wait for processes to complete
-        let nar_status = nar_process.wait().await?;
         let xz_status = xz_process.wait().await?;
-
-        if !nar_status.success() {
-            return Err(anyhow!("nix-store --dump failed"));
-        }
-
         if !xz_status.success() {
             return Err(anyhow!("{} compression failed", compressor));
         }
@@ -236,38 +238,18 @@ impl NixStore {
         Ok(compressed_data)
     }
 
-    /// Compress NAR using in-process xz via async-compression
-    async fn dump_nar_compressed_inprocess(&self, path: &str) -> Result<Vec<u8>> {
-        // Spawn nix-store --dump
-        let mut nar_process = Command::new("nix-store")
-            .arg("--dump")
-            .arg(path)
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .spawn()
-            .context("Failed to spawn nix-store --dump")?;
-
-        let mut nar_stdout = nar_process.stdout.take()
-            .ok_or_else(|| anyhow!("Failed to get stdout from nix-store"))?;
-
-        // Compress in-process using async-compression
-        let compressed_data = Vec::new();
-        let mut encoder = XzEncoder::new(compressed_data);
+    /// Compress a stream using in-process xz via async-compression
+    async fn compress_inprocess(
+        mut nar_stdout: tokio::process::ChildStdout,
+    ) -> Result<Vec<u8>> {
+        let mut encoder = XzEncoder::new(Vec::new());
 
         tokio::io::copy(&mut nar_stdout, &mut encoder).await
             .context("Failed to compress NAR")?;
         encoder.shutdown().await
             .context("Failed to finalize xz compression")?;
 
-        let compressed_data = encoder.into_inner();
-
-        // Wait for nix-store to complete
-        let nar_status = nar_process.wait().await?;
-        if !nar_status.success() {
-            return Err(anyhow!("nix-store --dump failed"));
-        }
-
-        Ok(compressed_data)
+        Ok(encoder.into_inner())
     }
 
     /// Get basename of a path
