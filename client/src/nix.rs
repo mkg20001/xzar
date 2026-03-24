@@ -1,9 +1,28 @@
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
+use std::sync::OnceLock;
 
 use anyhow::{anyhow, Context, Result};
-use tokio::io::AsyncReadExt;
+use async_compression::tokio::write::XzEncoder;
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::process::Command;
+
+/// Check once whether pixz is available on PATH
+fn pixz_available() -> bool {
+    static AVAILABLE: OnceLock<bool> = OnceLock::new();
+    *AVAILABLE.get_or_init(|| {
+        let available = std::process::Command::new("pixz")
+            .arg("--help")
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status()
+            .is_ok();
+        if !available {
+            tracing::warn!("pixz not found, falling back to in-process xz compression");
+        }
+        available
+    })
+}
 
 /// Details about a Nix store path
 #[derive(Debug, Clone)]
@@ -149,7 +168,16 @@ impl NixStore {
     /// Dump a store path as NAR and compress with xz
     /// Returns the compressed data
     pub async fn dump_nar_compressed(&self, path: &str, use_pixz: bool) -> Result<Vec<u8>> {
-        use tokio::io::{AsyncWriteExt, copy};
+        if use_pixz && pixz_available() {
+            self.dump_nar_compressed_external(path, "pixz").await
+        } else {
+            self.dump_nar_compressed_inprocess(path).await
+        }
+    }
+
+    /// Compress NAR using an external command (pixz or xz)
+    async fn dump_nar_compressed_external(&self, path: &str, compressor: &str) -> Result<Vec<u8>> {
+        use tokio::io::copy;
 
         // Spawn nix-store --dump
         let mut nar_process = Command::new("nix-store")
@@ -164,7 +192,6 @@ impl NixStore {
             .ok_or_else(|| anyhow!("Failed to get stdout from nix-store"))?;
 
         // Spawn compressor
-        let compressor = if use_pixz { "pixz" } else { "xz" };
         let mut xz_process = Command::new(compressor)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
@@ -204,6 +231,40 @@ impl NixStore {
 
         if !xz_status.success() {
             return Err(anyhow!("{} compression failed", compressor));
+        }
+
+        Ok(compressed_data)
+    }
+
+    /// Compress NAR using in-process xz via async-compression
+    async fn dump_nar_compressed_inprocess(&self, path: &str) -> Result<Vec<u8>> {
+        // Spawn nix-store --dump
+        let mut nar_process = Command::new("nix-store")
+            .arg("--dump")
+            .arg(path)
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .context("Failed to spawn nix-store --dump")?;
+
+        let mut nar_stdout = nar_process.stdout.take()
+            .ok_or_else(|| anyhow!("Failed to get stdout from nix-store"))?;
+
+        // Compress in-process using async-compression
+        let compressed_data = Vec::new();
+        let mut encoder = XzEncoder::new(compressed_data);
+
+        tokio::io::copy(&mut nar_stdout, &mut encoder).await
+            .context("Failed to compress NAR")?;
+        encoder.shutdown().await
+            .context("Failed to finalize xz compression")?;
+
+        let compressed_data = encoder.into_inner();
+
+        // Wait for nix-store to complete
+        let nar_status = nar_process.wait().await?;
+        if !nar_status.success() {
+            return Err(anyhow!("nix-store --dump failed"));
         }
 
         Ok(compressed_data)
