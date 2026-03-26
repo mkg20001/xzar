@@ -227,6 +227,7 @@ impl ApiClient {
         let response = self.client
             .put(format!("{}/uploadNar", self.base_url))
             .header("Authorization", format!("Bearer {}", self.key))
+            .timeout(Duration::from_secs(3600))
             .multipart(form)
             .send()
             .await
