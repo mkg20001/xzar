@@ -205,6 +205,12 @@ pub struct OidcProviderInfo {
     pub name: String,
 }
 
+/// Generic success response
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct OkResponse {
+    pub ok: bool,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

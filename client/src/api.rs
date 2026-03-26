@@ -10,7 +10,7 @@ use tokio::sync::Mutex;
 use xzar_common::{
     AdminTokenResponse, AdminUserResponse, CheckRequest, CheckResponse, CreateTokenRequest,
     CreateTokenResponse, CreateUserRequest, FinalizePinRequest, LockRequest, LockResponse,
-    PinResponse, UpdateUserRequest,
+    OkResponse, PinResponse, UpdateUserRequest,
 };
 
 pub use xzar_common::format_duration;
@@ -232,11 +232,8 @@ impl ApiClient {
             .await
             .context("Failed to upload NAR")?;
 
-        if !response.status().is_success() {
-            let status = response.status();
-            let body = response.text().await.unwrap_or_default();
-            return Err(anyhow!("Upload failed ({}): {}", status, body));
-        }
+        let _: OkResponse = self.handle_response(response).await
+            .context("Upload NAR failed")?;
 
         Ok(())
     }
