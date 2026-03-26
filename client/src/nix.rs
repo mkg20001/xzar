@@ -12,12 +12,7 @@ use tokio_util::io::ReaderStream;
 fn pixz_available() -> bool {
     static AVAILABLE: OnceLock<bool> = OnceLock::new();
     *AVAILABLE.get_or_init(|| {
-        let available = std::process::Command::new("pixz")
-            .arg("--help")
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .status()
-            .is_ok();
+        let available = which::which("pixz").is_ok();
         if !available {
             tracing::warn!("pixz not found, falling back to in-process xz compression");
         }

@@ -47,6 +47,7 @@ num_cpus = "1"
 humansize = "2"
 libc = "0.2"
 chrono = "0.4"
+which = "7"
 
 # Config file
 dirs = "6"
