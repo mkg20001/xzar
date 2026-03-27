@@ -58,7 +58,9 @@ pub fn get_narinfo(drv_id_narinfo: String, db: Db) -> Result<(ContentType, Strin
     }
 
     if let Some(ref deriver) = drv.deriver {
-        narinfo.push_str(&format!("Deriver: {}\n", deriver));
+        if !deriver.is_empty() {
+            narinfo.push_str(&format!("Deriver: {}\n", deriver));
+        }
     }
 
     if let Some(ref sig) = drv.sig {

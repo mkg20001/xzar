@@ -97,12 +97,13 @@ pub async fn upload_nar(
                 );
             }
             "deriver" => {
-                deriver = Some(
-                    field
-                        .text()
-                        .await
-                        .map_err(|e| AppError::Multipart(e.to_string()))?,
-                );
+                let value = field
+                    .text()
+                    .await
+                    .map_err(|e| AppError::Multipart(e.to_string()))?;
+                if !value.is_empty() {
+                    deriver = Some(value);
+                }
             }
             "size" => {
                 let s = field
