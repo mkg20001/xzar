@@ -2,6 +2,14 @@
 
 A pinning-based Nix binary cache server with web UI.
 
+## Action for github actions
+
+```
+  - uses: mkg20001/xzar/action@main
+    with:
+      install-nix: true  # only if Nix isn't already available
+```
+
 ## Server
 
 ### Configuration
