@@ -1,0 +1,20 @@
+name: "Install xzar"
+description: "Install the xzar Nix binary cache client"
+
+inputs:
+  install-nix:
+    description: "Install Nix using DeterminateSystems/nix-installer-action"
+    required: false
+    default: "false"
+
+runs:
+  using: "composite"
+  steps:
+    - name: Install Nix
+      if: inputs.install-nix == 'true'
+      uses: DeterminateSystems/nix-installer-action@main
+
+    - name: Build and install xzar
+      shell: bash
+      run: |
+        nix profile install "github:${{ github.action_repository }}/${{ github.action_ref }}#xzar-client"
