@@ -10,7 +10,7 @@ use tokio::sync::Mutex;
 use xzar_common::{
     AdminTokenResponse, AdminUserResponse, CheckRequest, CheckResponse, CreateTokenRequest,
     CreateTokenResponse, CreateUserRequest, FinalizePinRequest, LockRequest, LockResponse,
-    OkResponse, PinResponse, UpdateUserRequest,
+    OkResponse, PinResponse, SelfResponse, UpdateUserRequest,
 };
 
 pub use xzar_common::format_duration;
@@ -64,6 +64,19 @@ impl ApiClient {
 
         serde_json::from_str(&body)
             .with_context(|| format!("Failed to parse response: {}", body))
+    }
+
+    /// Get information about the current token
+    pub async fn get_self(&self) -> Result<SelfResponse> {
+        let response = self
+            .client
+            .get(format!("{}/self", self.base_url))
+            .header("Authorization", format!("Bearer {}", self.key))
+            .send()
+            .await
+            .context("Failed to connect to server")?;
+
+        self.handle_response(response).await
     }
 
     /// Check which paths are not in the cache
@@ -378,10 +391,14 @@ impl ApiClient {
         &self,
         user_id: Option<i32>,
         description: Option<&str>,
+        can_read: Option<bool>,
+        can_write: Option<bool>,
     ) -> Result<CreateTokenResponse> {
         let request = CreateTokenRequest {
             user_id,
             description: description.map(|s| s.to_string()),
+            can_read,
+            can_write,
         };
 
         let response = self

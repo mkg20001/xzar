@@ -184,6 +184,8 @@ pub fn list_tokens(_admin: AdminUser, db: Db) -> Result<Json<Vec<AdminTokenRespo
             is_system: token.is_system,
             description: token.description,
             created: token.created.to_string(),
+            can_read: token.can_read,
+            can_write: token.can_write,
         })
         .collect();
 
@@ -202,6 +204,16 @@ pub fn create_token(
 
     // Determine if this is a system token or user token
     let is_system = request.user_id.is_none();
+
+    // Resolve permissions (default both true if not specified)
+    let can_read = request.can_read.unwrap_or(true);
+    let can_write = request.can_write.unwrap_or(true);
+
+    if !can_read && !can_write {
+        return Err(AppError::BadRequest(
+            "Token must have at least one of can_read or can_write".to_string(),
+        ));
+    }
 
     // If user_id is provided, verify user exists
     if let Some(user_id) = request.user_id {
@@ -230,6 +242,8 @@ pub fn create_token(
         token_hash,
         is_system,
         description: request.description.clone(),
+        can_read,
+        can_write,
     };
 
     let token: Token = diesel::insert_into(tokens::table)
@@ -253,12 +267,34 @@ pub fn update_token(
 ) -> Result<Json<AdminTokenResponse>> {
     let mut conn = db.0;
 
-    let updated = diesel::update(tokens::table.filter(tokens::id.eq(id)))
-        .set(tokens::description.eq(&request.description))
-        .execute(&mut conn)?;
+    // Check token exists
+    let existing: Token = tokens::table
+        .find(id)
+        .first(&mut conn)
+        .optional()?
+        .ok_or_else(|| AppError::NotFound("Token not found".to_string()))?;
 
-    if updated == 0 {
-        return Err(AppError::NotFound("Token not found".to_string()));
+    // Update description if provided
+    if request.description.is_some() {
+        diesel::update(tokens::table.filter(tokens::id.eq(id)))
+            .set(tokens::description.eq(&request.description))
+            .execute(&mut conn)?;
+    }
+
+    // Update permissions if provided
+    if request.can_read.is_some() || request.can_write.is_some() {
+        let new_read = request.can_read.unwrap_or(existing.can_read);
+        let new_write = request.can_write.unwrap_or(existing.can_write);
+
+        if !new_read && !new_write {
+            return Err(AppError::BadRequest(
+                "Token must have at least one of can_read or can_write".to_string(),
+            ));
+        }
+
+        diesel::update(tokens::table.filter(tokens::id.eq(id)))
+            .set((tokens::can_read.eq(new_read), tokens::can_write.eq(new_write)))
+            .execute(&mut conn)?;
     }
 
     // Fetch updated token with user info
@@ -275,6 +311,8 @@ pub fn update_token(
         is_system: token.is_system,
         description: token.description,
         created: token.created.to_string(),
+        can_read: token.can_read,
+        can_write: token.can_write,
     }))
 }
 

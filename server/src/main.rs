@@ -99,6 +99,12 @@ enum TokenAction {
         /// Description for the token
         #[arg(long)]
         description: Option<String>,
+        /// Grant read permission
+        #[arg(long)]
+        read: bool,
+        /// Grant write permission
+        #[arg(long)]
+        write: bool,
     },
     /// List all tokens
     List,
@@ -239,6 +245,8 @@ fn handle_token_action(
             user,
             system,
             description,
+            read,
+            write,
         } => {
             // Validate: either user token or system token, not both
             if user.is_some() && system {
@@ -250,6 +258,13 @@ fn handle_token_action(
                 eprintln!("Must specify either --user or --system");
                 std::process::exit(1);
             }
+
+            // Resolve permissions: if neither flag, both true
+            let (can_read, can_write) = if !read && !write {
+                (true, true)
+            } else {
+                (read, write)
+            };
 
             // Look up user if specified
             let user_id = if let Some(ref username) = user {
@@ -276,13 +291,15 @@ fn handle_token_action(
                 token_hash,
                 is_system: system,
                 description,
+                can_read,
+                can_write,
             };
 
             let token: Token = diesel::insert_into(tokens::table)
                 .values(&new_token)
                 .get_result(&mut conn)?;
 
-            println!("Created token (id: {})", token.id);
+            println!("Created token (id: {}, read: {}, write: {})", token.id, can_read, can_write);
             println!("Token: {}", raw_token);
             println!("\nSave this token - it cannot be recovered!");
         }
@@ -295,19 +312,21 @@ fn handle_token_action(
                 .load(&mut conn)?;
 
             println!(
-                "{:<6} {:<20} {:<8} {:<20} {}",
-                "ID", "User", "System", "Created", "Description"
+                "{:<6} {:<20} {:<8} {:<6} {:<6} {:<20} {}",
+                "ID", "User", "System", "Read", "Write", "Created", "Description"
             );
-            println!("{}", "-".repeat(80));
+            println!("{}", "-".repeat(92));
 
             for (token, user) in all_tokens {
                 let user_name = user.map(|u| u.name).unwrap_or_else(|| "-".to_string());
                 let desc = token.description.unwrap_or_default();
                 println!(
-                    "{:<6} {:<20} {:<8} {:<20} {}",
+                    "{:<6} {:<20} {:<8} {:<6} {:<6} {:<20} {}",
                     token.id,
                     user_name,
                     token.is_system,
+                    token.can_read,
+                    token.can_write,
                     token.created.format("%Y-%m-%d %H:%M"),
                     desc
                 );

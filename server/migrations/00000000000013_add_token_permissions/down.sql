@@ -1,0 +1,3 @@
+ALTER TABLE tokens DROP CONSTRAINT IF EXISTS check_token_permissions;
+ALTER TABLE tokens DROP COLUMN IF EXISTS can_read;
+ALTER TABLE tokens DROP COLUMN IF EXISTS can_write;

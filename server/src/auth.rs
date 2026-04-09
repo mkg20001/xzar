@@ -66,12 +66,18 @@ fn validate_token(
 
     match result {
         Some((token, None)) if token.is_system => {
-            Some(AuthenticatedEntity::System { token_id: token.id })
+            Some(AuthenticatedEntity::System {
+                token_id: token.id,
+                can_read: token.can_read,
+                can_write: token.can_write,
+            })
         }
         Some((token, Some(user))) if !token.is_system => {
             Some(AuthenticatedEntity::User {
                 token_id: token.id,
                 user,
+                can_read: token.can_read,
+                can_write: token.can_write,
             })
         }
         _ => None,
@@ -179,7 +185,7 @@ impl<'r> FromRequest<'r> for AuthenticatedUser {
             // No tokens in database - development mode
             tracing::warn!("No tokens in database, allowing unauthenticated access");
             return Outcome::Success(AuthenticatedUser {
-                entity: AuthenticatedEntity::System { token_id: 0 },
+                entity: AuthenticatedEntity::System { token_id: 0, can_read: true, can_write: true },
             });
         }
 
@@ -195,6 +201,48 @@ impl<'r> FromRequest<'r> for AdminUser {
         match AuthenticatedUser::from_request(request).await {
             Outcome::Success(auth) if auth.is_admin() => {
                 Outcome::Success(AdminUser { entity: auth.entity })
+            }
+            Outcome::Success(_) => Outcome::Error((Status::Forbidden, ())),
+            Outcome::Error(e) => Outcome::Error(e),
+            Outcome::Forward(f) => Outcome::Forward(f),
+        }
+    }
+}
+
+/// Request guard that requires read permission
+pub struct ReadUser {
+    pub entity: AuthenticatedEntity,
+}
+
+#[rocket::async_trait]
+impl<'r> FromRequest<'r> for ReadUser {
+    type Error = ();
+
+    async fn from_request(request: &'r rocket::Request<'_>) -> Outcome<Self, Self::Error> {
+        match AuthenticatedUser::from_request(request).await {
+            Outcome::Success(auth) if auth.entity.can_read() => {
+                Outcome::Success(ReadUser { entity: auth.entity })
+            }
+            Outcome::Success(_) => Outcome::Error((Status::Forbidden, ())),
+            Outcome::Error(e) => Outcome::Error(e),
+            Outcome::Forward(f) => Outcome::Forward(f),
+        }
+    }
+}
+
+/// Request guard that requires write permission
+pub struct WriteUser {
+    pub entity: AuthenticatedEntity,
+}
+
+#[rocket::async_trait]
+impl<'r> FromRequest<'r> for WriteUser {
+    type Error = ();
+
+    async fn from_request(request: &'r rocket::Request<'_>) -> Outcome<Self, Self::Error> {
+        match AuthenticatedUser::from_request(request).await {
+            Outcome::Success(auth) if auth.entity.can_write() => {
+                Outcome::Success(WriteUser { entity: auth.entity })
             }
             Outcome::Success(_) => Outcome::Error((Status::Forbidden, ())),
             Outcome::Error(e) => Outcome::Error(e),

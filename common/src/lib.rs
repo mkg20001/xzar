@@ -117,6 +117,8 @@ pub struct SelfResponse {
     pub is_admin: bool,
     pub credential_type: String,
     pub user: Option<UserInfo>,
+    pub can_read: bool,
+    pub can_write: bool,
 }
 
 /// User info in self response
@@ -149,6 +151,8 @@ pub struct AdminTokenResponse {
     pub is_system: bool,
     pub description: Option<String>,
     pub created: String,
+    pub can_read: bool,
+    pub can_write: bool,
 }
 
 /// Request to create a user
@@ -179,6 +183,10 @@ pub struct CreateTokenRequest {
     pub user_id: Option<i32>,
     #[serde(default)]
     pub description: Option<String>,
+    #[serde(default)]
+    pub can_read: Option<bool>,
+    #[serde(default)]
+    pub can_write: Option<bool>,
 }
 
 /// Response after creating a token (includes raw token)
@@ -194,6 +202,10 @@ pub struct CreateTokenResponse {
 #[serde(rename_all = "camelCase")]
 pub struct UpdateTokenRequest {
     pub description: Option<String>,
+    #[serde(default)]
+    pub can_read: Option<bool>,
+    #[serde(default)]
+    pub can_write: Option<bool>,
 }
 
 // ============ OIDC Types ============

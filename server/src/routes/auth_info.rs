@@ -32,5 +32,7 @@ pub fn get_self(auth: AuthenticatedUser) -> Json<SelfResponse> {
         is_admin: auth.is_admin(),
         credential_type,
         user,
+        can_read: auth.entity.can_read(),
+        can_write: auth.entity.can_write(),
     })
 }

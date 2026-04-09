@@ -8,7 +8,7 @@ use rocket::serde::json::Json;
 use rocket::State;
 use tokio_util::io::StreamReader;
 
-use crate::auth::AuthenticatedUser;
+use crate::auth::WriteUser;
 use crate::config::Config;
 use crate::crypto::{parse_hash, NixSigningKey};
 use crate::db::Db;
@@ -22,7 +22,7 @@ use crate::storage::{Storage, StorageBackend};
 /// Streams file data directly to storage to avoid memory buildup.
 #[put("/uploadNar", data = "<data>")]
 pub async fn upload_nar(
-    _auth: AuthenticatedUser,
+    _auth: WriteUser,
     content_type: &ContentType,
     db: Db,
     storage: &State<Storage>,

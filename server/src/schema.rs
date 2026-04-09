@@ -81,6 +81,8 @@ diesel::table! {
         #[max_length = 256]
         description -> Nullable<Varchar>,
         created -> Timestamp,
+        can_read -> Bool,
+        can_write -> Bool,
     }
 }
 

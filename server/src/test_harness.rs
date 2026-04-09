@@ -217,6 +217,8 @@ impl TestServerBuilder {
                 token_hash,
                 is_system: true,
                 description: Some("Test harness token".to_string()),
+                can_read: true,
+                can_write: true,
             };
 
             diesel::insert_into(tokens::table)

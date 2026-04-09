@@ -149,6 +149,8 @@ pub struct Token {
     pub is_system: bool,
     pub description: Option<String>,
     pub created: NaiveDateTime,
+    pub can_read: bool,
+    pub can_write: bool,
 }
 
 #[derive(Debug, Clone, Insertable)]
@@ -158,6 +160,8 @@ pub struct NewToken {
     pub token_hash: String,
     pub is_system: bool,
     pub description: Option<String>,
+    pub can_read: bool,
+    pub can_write: bool,
 }
 
 // ============ OIDC Identities ============
@@ -247,9 +251,9 @@ pub struct NewSession {
 #[derive(Debug, Clone)]
 pub enum AuthenticatedEntity {
     /// System token (admin-level, no associated user)
-    System { token_id: i32 },
+    System { token_id: i32, can_read: bool, can_write: bool },
     /// User token with associated user info
-    User { token_id: i32, user: User },
+    User { token_id: i32, user: User, can_read: bool, can_write: bool },
     /// Session-based auth (from OIDC login)
     Session { session_id: i32, user: User },
 }
@@ -273,7 +277,7 @@ impl AuthenticatedEntity {
 
     pub fn token_id(&self) -> Option<i32> {
         match self {
-            AuthenticatedEntity::System { token_id } => Some(*token_id),
+            AuthenticatedEntity::System { token_id, .. } => Some(*token_id),
             AuthenticatedEntity::User { token_id, .. } => Some(*token_id),
             AuthenticatedEntity::Session { .. } => None,
         }
@@ -284,6 +288,22 @@ impl AuthenticatedEntity {
             AuthenticatedEntity::System { .. } => None,
             AuthenticatedEntity::User { .. } => None,
             AuthenticatedEntity::Session { session_id, .. } => Some(*session_id),
+        }
+    }
+
+    pub fn can_read(&self) -> bool {
+        match self {
+            AuthenticatedEntity::System { can_read, .. } => *can_read,
+            AuthenticatedEntity::User { can_read, .. } => *can_read,
+            AuthenticatedEntity::Session { .. } => true,
+        }
+    }
+
+    pub fn can_write(&self) -> bool {
+        match self {
+            AuthenticatedEntity::System { can_write, .. } => *can_write,
+            AuthenticatedEntity::User { can_write, .. } => *can_write,
+            AuthenticatedEntity::Session { .. } => true,
         }
     }
 }

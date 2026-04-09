@@ -1,0 +1,3 @@
+ALTER TABLE tokens ADD COLUMN can_read BOOLEAN NOT NULL DEFAULT TRUE;
+ALTER TABLE tokens ADD COLUMN can_write BOOLEAN NOT NULL DEFAULT TRUE;
+ALTER TABLE tokens ADD CONSTRAINT check_token_permissions CHECK (can_read OR can_write);

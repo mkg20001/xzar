@@ -164,6 +164,12 @@ enum TokenAction {
         /// Description for the token
         #[arg(long)]
         description: Option<String>,
+        /// Grant read permission
+        #[arg(long)]
+        read: bool,
+        /// Grant write permission
+        #[arg(long)]
+        write: bool,
     },
     /// List all tokens
     List,
@@ -213,7 +219,7 @@ async fn main() -> Result<()> {
 
     // Handle config commands first (they don't need server/key)
     if let Command::Config { action } = args.command {
-        return cmd_config(action);
+        return cmd_config(action).await;
     }
 
     // Load config file (if it exists)
@@ -473,9 +479,16 @@ async fn cmd_user(api: ApiClient, action: UserAction) -> Result<()> {
 
 async fn cmd_token(api: ApiClient, action: TokenAction) -> Result<()> {
     match action {
-        TokenAction::Create { user, description } => {
+        TokenAction::Create { user, description, read, write } => {
+            // Resolve permissions: if neither flag, both true (default)
+            let (can_read, can_write) = if !read && !write {
+                (None, None) // let server default to both true
+            } else {
+                (Some(read), Some(write))
+            };
+
             let result = api
-                .create_token(user, description.as_deref())
+                .create_token(user, description.as_deref(), can_read, can_write)
                 .await
                 .context("Failed to create token")?;
 
@@ -493,17 +506,17 @@ async fn cmd_token(api: ApiClient, action: TokenAction) -> Result<()> {
             }
 
             println!(
-                "{:<6} {:<20} {:<8} {:<20} {}",
-                "ID", "User", "System", "Created", "Description"
+                "{:<6} {:<20} {:<8} {:<6} {:<6} {:<20} {}",
+                "ID", "User", "System", "Read", "Write", "Created", "Description"
             );
-            println!("{}", "-".repeat(80));
+            println!("{}", "-".repeat(92));
 
             for token in tokens {
                 let user_name = token.user_name.as_deref().unwrap_or("-");
                 let desc = token.description.as_deref().unwrap_or("");
                 println!(
-                    "{:<6} {:<20} {:<8} {:<20} {}",
-                    token.id, user_name, token.is_system, token.created, desc
+                    "{:<6} {:<20} {:<8} {:<6} {:<6} {:<20} {}",
+                    token.id, user_name, token.is_system, token.can_read, token.can_write, token.created, desc
                 );
             }
         }
@@ -520,7 +533,7 @@ async fn cmd_token(api: ApiClient, action: TokenAction) -> Result<()> {
     Ok(())
 }
 
-fn cmd_config(action: ConfigAction) -> Result<()> {
+async fn cmd_config(action: ConfigAction) -> Result<()> {
     let mut config = Config::load().unwrap_or_default();
 
     match action {
@@ -530,6 +543,26 @@ fn cmd_config(action: ConfigAction) -> Result<()> {
             key,
             default,
         } => {
+            // Verify the token works before saving
+            println!("Verifying token with server...");
+            let api = ApiClient::new(&url, &key)?;
+            let self_info = api.get_self().await
+                .context("Token verification failed. The token may be invalid or the server unreachable")?;
+
+            let perms = match (self_info.can_read, self_info.can_write) {
+                (true, true) => "read+write",
+                (true, false) => "read-only",
+                (false, true) => "write-only",
+                (false, false) => "none",
+            };
+            println!(
+                "Token valid: type={}, admin={}, permissions={}",
+                self_info.credential_type, self_info.is_admin, perms
+            );
+            if let Some(user) = &self_info.user {
+                println!("User: {} (id: {})", user.name, user.id);
+            }
+
             config.add_server(name.clone(), url.clone(), key);
 
             if default {

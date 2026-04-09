@@ -4,7 +4,7 @@ use diesel::prelude::*;
 use rocket::post;
 use rocket::serde::json::Json;
 
-use crate::auth::AuthenticatedUser;
+use crate::auth::WriteUser;
 use crate::db::Db;
 use crate::error::{AppError, Result};
 use crate::models::{CheckRequest, CheckResponse};
@@ -27,7 +27,7 @@ fn extract_drv_id(path: &str) -> &str {
 /// Check which paths are not in the cache
 #[post("/check", data = "<request>")]
 pub fn check_paths(
-    _auth: AuthenticatedUser,
+    _auth: WriteUser,
     db: Db,
     request: Json<CheckRequest>,
 ) -> Result<Json<CheckResponse>> {

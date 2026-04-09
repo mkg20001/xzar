@@ -3,7 +3,7 @@ use diesel::prelude::*;
 use rocket::{delete, get, post};
 use rocket::serde::json::Json;
 
-use crate::auth::AuthenticatedUser;
+use crate::auth::{ReadUser, WriteUser};
 use crate::db::Db;
 use crate::error::{AppError, Result};
 use crate::models::{DrvPin, FinalizePinRequest, NewPin, Pin, PinRoot, PinWithRoots, UpdatePin};
@@ -13,7 +13,7 @@ use crate::schema::{drv_pins, drvs, pins};
 /// Create a named pin (collection) of packages
 #[post("/finalizePin", data = "<request>")]
 pub fn finalize_pin(
-    _auth: AuthenticatedUser,
+    _auth: WriteUser,
     db: Db,
     request: Json<FinalizePinRequest>,
 ) -> Result<Json<i32>> {
@@ -120,7 +120,7 @@ pub fn finalize_pin(
 /// GET /pins
 /// List all pins with their roots
 #[get("/pins")]
-pub fn list_pins(_auth: AuthenticatedUser, db: Db) -> Result<Json<Vec<PinWithRoots>>> {
+pub fn list_pins(_auth: ReadUser, db: Db) -> Result<Json<Vec<PinWithRoots>>> {
     let mut conn = db.0;
 
     // Get all pins ordered by expires ASC (nulls last)
@@ -162,7 +162,7 @@ pub fn list_pins(_auth: AuthenticatedUser, db: Db) -> Result<Json<Vec<PinWithRoo
 /// DELETE /pins/<id>
 /// Abandon a pin (mark as abandoned and set expires based on leave_after_abandon)
 #[delete("/pins/<id>")]
-pub fn abandon_pin(_auth: AuthenticatedUser, db: Db, id: i32) -> Result<Json<bool>> {
+pub fn abandon_pin(_auth: WriteUser, db: Db, id: i32) -> Result<Json<bool>> {
     let mut conn = db.0;
 
     // First fetch the pin to get leave_after_abandon

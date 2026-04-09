@@ -3,7 +3,7 @@ use diesel::prelude::*;
 use rocket::post;
 use rocket::serde::json::Json;
 
-use crate::auth::AuthenticatedUser;
+use crate::auth::WriteUser;
 use crate::db::Db;
 use crate::error::{AppError, Result};
 use crate::models::{Lock, LockClearRequest, LockExtendRequest, LockResponse, NewLock, OkResponse};
@@ -14,7 +14,7 @@ const LOCK_TTL_DAYS: i64 = 2;
 /// POST /lock/request
 /// Request a new upload lock (2-day TTL)
 #[post("/lock/request")]
-pub fn lock_request(_auth: AuthenticatedUser, db: Db) -> Result<Json<LockResponse>> {
+pub fn lock_request(_auth: WriteUser, db: Db) -> Result<Json<LockResponse>> {
     let mut conn = db.0;
 
     let new_lock = NewLock { owner: 1 };
@@ -33,7 +33,7 @@ pub fn lock_request(_auth: AuthenticatedUser, db: Db) -> Result<Json<LockRespons
 /// Extend a lock's deadline by 2 more days
 #[post("/lock/extend", data = "<request>")]
 pub fn lock_extend(
-    _auth: AuthenticatedUser,
+    _auth: WriteUser,
     db: Db,
     request: Json<LockExtendRequest>,
 ) -> Result<Json<LockResponse>> {
@@ -57,7 +57,7 @@ pub fn lock_extend(
 /// Release/clear a lock
 #[post("/lock/clear", data = "<request>")]
 pub fn lock_clear(
-    _auth: AuthenticatedUser,
+    _auth: WriteUser,
     db: Db,
     request: Json<LockClearRequest>,
 ) -> Result<Json<OkResponse>> {
