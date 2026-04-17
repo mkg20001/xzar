@@ -36,8 +36,8 @@ pub async fn upload_nar(
         .map(|(_, v)| v)
         .ok_or_else(|| AppError::BadRequest("Missing multipart boundary".to_string()))?;
 
-    // Create a stream from the incoming data (up to 2GB)
-    let stream = data.open(2.gibibytes());
+    // Create a stream from the incoming data (up to 10GB)
+    let stream = data.open(10.gibibytes());
 
     // Convert Rocket's DataStream to a futures Stream of bytes
     let byte_stream = tokio_util::io::ReaderStream::new(stream);
