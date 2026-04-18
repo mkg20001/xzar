@@ -1,7 +1,7 @@
 [default]
 address = "::"
 port = 17788
-limits = { form = "2 GiB", data-form = "2 GiB", file = "2 GiB" }
+limits = { form = "10 GiB", data-form = "10 GiB", file = "10 GiB" }
 
 [debug]
 log_level = "debug"
