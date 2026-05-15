@@ -38,6 +38,8 @@ impl ApiClient {
     pub fn new(base_url: &str, key: &str) -> Result<Self> {
         let client = Client::builder()
             .timeout(Duration::from_secs(300))
+            .pool_idle_timeout(Duration::from_secs(30))
+            .tcp_keepalive(Duration::from_secs(15))
             .build()
             .context("Failed to create HTTP client")?;
 

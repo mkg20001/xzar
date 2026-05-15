@@ -2,6 +2,7 @@
 address = "::"
 port = 17788
 limits = { form = "10 GiB", data-form = "10 GiB", file = "10 GiB" }
+keep_alive = 60
 
 [debug]
 log_level = "debug"
