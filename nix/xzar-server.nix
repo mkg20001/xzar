@@ -17,6 +17,7 @@ rustPlatform.buildRustPackage {
 
   cargoLock.lockFile = "${src}/Cargo.lock";
   cargoBuildFlags = [ "-p" "xzar-server" "--features" "embed-ui" ];
+  cargoTestFlags = [ "-p" "xzar-server" ];
 
   nativeBuildInputs = [
     pkg-config
