@@ -15,7 +15,7 @@ pub struct Database(pub DbPool);
 impl Database {
     pub fn new(database_url: &str) -> Result<Self, diesel::r2d2::PoolError> {
         let manager = ConnectionManager::<PgConnection>::new(database_url);
-        let pool = Pool::builder().max_size(10).build(manager)?;
+        let pool = Pool::builder().max_size(32).build(manager)?;
         Ok(Database(pool))
     }
 

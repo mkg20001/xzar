@@ -11,7 +11,7 @@ use tokio_util::io::StreamReader;
 use crate::auth::WriteUser;
 use crate::config::Config;
 use crate::crypto::{parse_hash, NixSigningKey};
-use crate::db::Db;
+use crate::db::Database;
 use crate::error::{AppError, Result};
 use crate::models::{DrvLock, NewDrv, OkResponse};
 use crate::schema::{drv_locks, drvs, locks};
@@ -20,11 +20,13 @@ use crate::storage::{Storage, StorageBackend};
 /// PUT /uploadNar
 /// Upload a NAR file with metadata (multipart form)
 /// Streams file data directly to storage to avoid memory buildup.
+/// Note: uses Database state instead of Db request guard to avoid holding
+/// a DB connection for the entire duration of the streaming upload.
 #[put("/uploadNar", data = "<data>")]
 pub async fn upload_nar(
     _auth: WriteUser,
     content_type: &ContentType,
-    db: Db,
+    database: &State<Database>,
     storage: &State<Storage>,
     config: &State<Config>,
     data: Data<'_>,
@@ -160,7 +162,8 @@ pub async fn upload_nar(
     let lock_id = lock.ok_or_else(|| AppError::BadRequest("Missing lock".to_string()))?;
     let drv_full = drv_full.ok_or_else(|| AppError::BadRequest("Missing drvFull".to_string()))?;
 
-    let mut conn = db.0;
+    // Acquire DB connection only now, after the slow streaming upload is done
+    let mut conn = database.get()?;
 
     // Verify lock exists
     let lock_exists: Option<i32> = locks::table
