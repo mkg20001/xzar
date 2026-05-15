@@ -15,6 +15,7 @@ rustPlatform.buildRustPackage {
 
   cargoLock.lockFile = "${src}/Cargo.lock";
   cargoBuildFlags = [ "-p" "xzar-client" ];
+  cargoTestFlags = [ "-p" "xzar-client" ];
 
   nativeBuildInputs = [
     pkg-config
