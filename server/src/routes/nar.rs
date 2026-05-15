@@ -4,7 +4,7 @@ use rocket::http::ContentType;
 use rocket::response::stream::ByteStream;
 use rocket::State;
 
-use crate::db::Db;
+use crate::db::Database;
 use crate::error::{AppError, Result};
 use crate::models::Drv;
 use crate::schema::drvs;
@@ -12,13 +12,15 @@ use crate::storage::{Storage, StorageBackend};
 
 /// GET /nar/{filename}
 /// Returns the NAR file as a streamed binary response
+/// Note: uses Database state instead of Db request guard to avoid holding
+/// a DB connection for the entire duration of the streamed response.
 #[get("/nar/<filename>")]
 pub async fn get_nar(
     filename: &str,
-    db: Db,
+    database: &State<Database>,
     storage: &State<Storage>,
 ) -> Result<(ContentType, ByteStream![Vec<u8>])> {
-    let mut conn = db.0;
+    let mut conn = database.get()?;
 
     // Find the derivation by nar_file
     let drv: Drv = drvs::table
@@ -26,6 +28,9 @@ pub async fn get_nar(
         .first(&mut conn)
         .optional()?
         .ok_or_else(|| AppError::NotFound(format!("NAR file not found: {}", filename)))?;
+
+    // Release DB connection before streaming begins
+    drop(conn);
 
     // Check if the file exists in storage
     if !storage.exists(&drv.nar_file_storage).await {
